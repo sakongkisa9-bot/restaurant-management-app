@@ -1,6 +1,8 @@
 "use client";
 
+import Image from "next/image";
 import { useEffect, useState } from "react";
+import { MenuManagement, type MenuItem } from "./menu-management";
 
 type Workspace = "customer" | "admin" | "waiter" | "cook" | "cashier" | "developer";
 type AdminPage = "Overview" | "Staff tracker" | "M-Pesa log" | "Restaurant profile" | "Menu";
@@ -9,7 +11,7 @@ type BusinessDay = { enabled: boolean; open: string; close: string };
 type Schedule = Record<DayName, BusinessDay>;
 
 const days: DayName[] = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
-const adminPages: AdminPage[] = ["Overview", "Staff tracker", "M-Pesa log", "Restaurant profile", "Menu"];
+const adminPages: AdminPage[] = ["Overview", "Menu", "Staff tracker", "M-Pesa log", "Restaurant profile"];
 
 const navigation: { id: Workspace; label: string; mark: string }[] = [
   { id: "customer", label: "Customer", mark: "CU" },
@@ -83,6 +85,34 @@ export default function Home() {
   const [passwordError, setPasswordError] = useState("");
   const [showHours, setShowHours] = useState(false);
   const [detailPanel, setDetailPanel] = useState<"recommendations" | "complaints" | null>(null);
+  const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
+  const [menuLoaded, setMenuLoaded] = useState(false);
+
+  useEffect(() => {
+    const loadMenu = window.setTimeout(() => {
+      try {
+        const storedItems = window.localStorage.getItem("room.menu.v1");
+        if (storedItems) {
+          const parsedItems: unknown = JSON.parse(storedItems);
+          if (Array.isArray(parsedItems)) setMenuItems(parsedItems as MenuItem[]);
+        }
+      } catch {
+        window.localStorage.removeItem("room.menu.v1");
+      }
+      setMenuLoaded(true);
+    }, 0);
+
+    return () => window.clearTimeout(loadMenu);
+  }, []);
+
+  useEffect(() => {
+    if (!menuLoaded) return;
+    try {
+      window.localStorage.setItem("room.menu.v1", JSON.stringify(menuItems));
+    } catch {
+      return;
+    }
+  }, [menuItems, menuLoaded]);
 
   useEffect(() => {
     const updateScheduleStatus = () => setScheduledOpen(isOpenAt(new Date(), schedule));
@@ -140,6 +170,11 @@ export default function Home() {
     setSchedule(draftSchedule);
     setManualStatus(null);
     setShowHours(false);
+  }
+
+  function saveMenuItems(updatedItems: MenuItem[]) {
+    const updates = new Map(updatedItems.map((item) => [item.id, item]));
+    setMenuItems((current) => current.map((item) => updates.get(item.id) ?? item));
   }
 
   function moveChart(direction: number) {
@@ -362,12 +397,18 @@ export default function Home() {
                   </section>
                 </div>
               </>
+            ) : adminPage === "Menu" ? (
+              <MenuManagement
+                items={menuItems}
+                onAddItem={(item) => setMenuItems((current) => [...current, item])}
+                onSaveItems={saveMenuItems}
+                onDeleteItem={(id) => setMenuItems((current) => current.filter((item) => item.id !== id))}
+              />
             ) : (
               <section className="panel placeholder-panel">
                 <p className="eyebrow">ADMIN WORKSPACE</p>
                 <h2>{adminPage}</h2>
                 <p>This page is ready to be built next. Its restaurant data will appear here once we add the workflow.</p>
-                {adminPage === "Menu" && <span className="placeholder-note">Menu management is the next page in the build.</span>}
               </section>
             )}
           </main>
@@ -378,10 +419,24 @@ export default function Home() {
               <div className="customer-welcome-copy"><p className="eyebrow">WELCOME</p><h1>A good meal is<br />closer than you think.</h1><p>The restaurant menu and online ordering will appear here once they&apos;re set up.</p><button className="primary-button" type="button" onClick={() => selectWorkspace("admin")}>Restaurant team <span aria-hidden="true">→</span></button></div>
               <div className="customer-visual" aria-hidden="true"><div className="plate plate-back" /><div className="plate plate-front"><span className="plate-center" /></div><span className="visual-leaf leaf-one" /><span className="visual-leaf leaf-two" /><span className="visual-dot dot-one" /><span className="visual-dot dot-two" /><span className="visual-caption">MADE FRESH<br />SERVED WITH CARE</span></div>
             </section>
-            <section className="customer-menu-empty">
-              <div><p className="eyebrow">THE MENU</p><h2>Something delicious is on its way.</h2><p>Check back soon to explore dishes, drinks, and today&apos;s specials.</p></div>
-              <div className="menu-empty-stamp">MENU<br />COMING<br />SOON</div>
-            </section>
+            {menuItems.length > 0 ? (
+              <section className="customer-menu-section">
+                <div className="customer-menu-heading"><div><p className="eyebrow">THE MENU</p><h2>Made fresh for you.</h2></div><span>{menuItems.length} {menuItems.length === 1 ? "dish" : "dishes"}</span></div>
+                <div className="customer-menu-grid">
+                  {menuItems.map((item) => (
+                    <article className="customer-food-card" key={item.id}>
+                      {item.image ? <Image src={item.image} alt={item.name} className="customer-food-image" width={500} height={320} unoptimized /> : <div className="customer-food-placeholder" aria-hidden="true">{item.name.slice(0, 1).toUpperCase()}</div>}
+                      <div className="customer-food-copy"><div className="food-card-tags"><span>{item.category}</span><span>{item.mealPeriod}</span></div><h3>{item.name}</h3><p>{item.description}</p><strong>KSh {item.price.toLocaleString("en-KE")}</strong></div>
+                    </article>
+                  ))}
+                </div>
+              </section>
+            ) : (
+              <section className="customer-menu-empty">
+                <div><p className="eyebrow">THE MENU</p><h2>Something delicious is on its way.</h2><p>Check back soon to explore dishes, drinks, and today&apos;s specials.</p></div>
+                <div className="menu-empty-stamp">MENU<br />COMING<br />SOON</div>
+              </section>
+            )}
           </main>
         ) : (
           <main className="page-content role-placeholder-content">
