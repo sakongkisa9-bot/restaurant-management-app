@@ -5,12 +5,14 @@ import { useEffect, useState } from "react";
 import { CustomerExperience } from "./customer-experience";
 import { MenuManagement, type MenuItem } from "./menu-management";
 import { defaultRestaurantProfile, RestaurantProfile, type RestaurantProfileData } from "./restaurant-profile";
+import { StaffTracker } from "./staff-tracker";
 
 type Workspace = "customer" | "admin" | "waiter" | "cook" | "cashier" | "developer";
 type AdminPage = "Overview" | "Staff tracker" | "M-Pesa log" | "Restaurant profile" | "Menu";
 type DayName = "Monday" | "Tuesday" | "Wednesday" | "Thursday" | "Friday" | "Saturday" | "Sunday";
 type BusinessDay = { enabled: boolean; open: string; close: string };
 type Schedule = Record<DayName, BusinessDay>;
+type CustomerFeedback = { id: string; type: "recommendation" | "complaint"; message: string; orderNumber: string | null; createdAt: string };
 
 const days: DayName[] = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 const adminPages: AdminPage[] = ["Overview", "Menu", "Restaurant profile", "Staff tracker", "M-Pesa log"];
@@ -92,6 +94,8 @@ export default function Home() {
   const [restaurantProfile, setRestaurantProfile] = useState<RestaurantProfileData>(defaultRestaurantProfile);
   const [profileLoaded, setProfileLoaded] = useState(false);
   const [tableNumber, setTableNumber] = useState("");
+  const [customerFeedback, setCustomerFeedback] = useState<CustomerFeedback[]>([]);
+  const [feedbackLoaded, setFeedbackLoaded] = useState(false);
 
   useEffect(() => {
     const loadMenu = window.setTimeout(() => {
@@ -155,6 +159,19 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    const loadFeedback = window.setTimeout(() => {
+      try {
+        const storedFeedback: unknown = JSON.parse(window.localStorage.getItem("room.customer-feedback.v1") ?? "[]");
+        if (Array.isArray(storedFeedback)) setCustomerFeedback(storedFeedback as CustomerFeedback[]);
+      } catch {
+        window.localStorage.removeItem("room.customer-feedback.v1");
+      }
+      setFeedbackLoaded(true);
+    }, 0);
+    return () => window.clearTimeout(loadFeedback);
+  }, []);
+
+  useEffect(() => {
     const updateScheduleStatus = () => setScheduledOpen(isOpenAt(new Date(), schedule));
     const initialUpdate = window.setTimeout(updateScheduleStatus, 0);
 
@@ -185,6 +202,12 @@ export default function Home() {
     if (window.matchMedia("(max-width: 650px)").matches) setExpanded(false);
 
     if (nextWorkspace === "admin") {
+      try {
+        const storedFeedback: unknown = JSON.parse(window.localStorage.getItem("room.customer-feedback.v1") ?? "[]");
+        if (Array.isArray(storedFeedback)) setCustomerFeedback(storedFeedback as CustomerFeedback[]);
+      } catch {
+        setCustomerFeedback([]);
+      }
       setPassword("");
       setPasswordError("");
       setShowPassword(true);
@@ -223,6 +246,8 @@ export default function Home() {
 
   const workspaceLabel = workspace === "developer" ? "Developer" : workspace[0].toUpperCase() + workspace.slice(1);
   const period = chartPeriods[chartIndex];
+  const recommendations = customerFeedback.filter((entry) => entry.type === "recommendation");
+  const complaints = customerFeedback.filter((entry) => entry.type === "complaint");
 
   return (
     <div className="app-shell">
@@ -271,10 +296,12 @@ export default function Home() {
           <div className="sidebar-footnote">{expanded ? "BUILD 0.1 · PREVIEW" : "0.1"}</div>
         </div>
       </aside>
+      {expanded && <button className="nav-scrim" type="button" aria-label="Close navigation" onClick={() => setExpanded(false)} />}
 
       <div className="main-column">
         <header className="topbar">
           <div className="topbar-context">
+            <button className="mobile-nav-trigger" type="button" aria-label={expanded ? "Close navigation" : "Open navigation"} aria-expanded={expanded} onClick={() => setExpanded((current) => !current)}><span /><span /><span /></button>
             <span className="context-dot" />
             <span>{workspaceLabel} workspace</span>
           </div>
@@ -427,13 +454,13 @@ export default function Home() {
                 <div className="feedback-grid">
                   <section className="feedback-panel recommendations-panel">
                     <div className="feedback-symbol">R</div>
-                    <div className="feedback-copy"><p className="eyebrow">CUSTOMER VOICE</p><h2>Recommendations <span>0</span></h2><p>None received yet.</p></div>
-                    <button className="secondary-button" type="button" onClick={() => setDetailPanel("recommendations")}>View recommendations</button>
+                    <div className="feedback-copy"><p className="eyebrow">CUSTOMER VOICE</p><h2>Recommendations <span>{feedbackLoaded ? recommendations.length : 0}</span></h2><p>{recommendations.length ? recommendations.at(-1)?.message : "None received yet."}</p></div>
+                    <button className="secondary-button" type="button" disabled={!recommendations.length} onClick={() => setDetailPanel("recommendations")}>View recommendations</button>
                   </section>
                   <section className="feedback-panel complaints-panel">
                     <div className="feedback-symbol complaint-symbol">!</div>
-                    <div className="feedback-copy"><p className="eyebrow">CUSTOMER VOICE</p><h2>Complaints <span>0</span></h2><p>None received yet.</p></div>
-                    <button className="secondary-button" type="button" onClick={() => setDetailPanel("complaints")}>View complaints</button>
+                    <div className="feedback-copy"><p className="eyebrow">CUSTOMER VOICE</p><h2>Complaints <span>{feedbackLoaded ? complaints.length : 0}</span></h2><p>{complaints.length ? complaints.at(-1)?.message : "None received yet."}</p></div>
+                    <button className="secondary-button" type="button" disabled={!complaints.length} onClick={() => setDetailPanel("complaints")}>View complaints</button>
                   </section>
                 </div>
               </>
@@ -450,6 +477,8 @@ export default function Home() {
               ) : (
                 <section className="panel placeholder-panel"><p className="eyebrow">RESTAURANT SETUP</p><h2>Loading profile</h2></section>
               )
+            ) : adminPage === "Staff tracker" ? (
+              <StaffTracker profile={restaurantProfile} />
             ) : (
               <section className="panel placeholder-panel">
                 <p className="eyebrow">ADMIN WORKSPACE</p>
@@ -521,7 +550,7 @@ export default function Home() {
             <button className="dialog-close" type="button" onClick={() => setDetailPanel(null)} aria-label="Close customer feedback">×</button>
             <p className="eyebrow">CUSTOMER VOICE</p>
             <h2 id="feedback-title">{detailPanel === "recommendations" ? "Recommendations" : "Complaints"}</h2>
-            <div className="empty-feedback"><span className="empty-icon">0</span><strong>None received yet</strong><p>New customer {detailPanel} will appear here.</p></div>
+            <div className="feedback-list-modal">{(detailPanel === "recommendations" ? recommendations : complaints).length === 0 ? <div className="empty-feedback"><span className="empty-icon">0</span><strong>None received yet</strong><p>New customer {detailPanel} will appear here.</p></div> : [...(detailPanel === "recommendations" ? recommendations : complaints)].reverse().map((entry) => <article className="feedback-message-row" key={entry.id}><p>{entry.message}</p><div><span>{entry.orderNumber ? `Order ${entry.orderNumber}` : "Customer feedback"}</span><time dateTime={entry.createdAt}>{new Intl.DateTimeFormat("en-KE", { dateStyle: "medium", timeStyle: "short" }).format(new Date(entry.createdAt))}</time></div></article>)}</div>
             <button className="secondary-button full-button" type="button" onClick={() => setDetailPanel(null)}>Close</button>
           </section>
         </div>
