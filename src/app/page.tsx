@@ -3,6 +3,7 @@
 import Image from "next/image";
 import { useEffect, useState } from "react";
 import { MenuManagement, type MenuItem } from "./menu-management";
+import { defaultRestaurantProfile, getMapsHref, RestaurantProfile, type RestaurantProfileData } from "./restaurant-profile";
 
 type Workspace = "customer" | "admin" | "waiter" | "cook" | "cashier" | "developer";
 type AdminPage = "Overview" | "Staff tracker" | "M-Pesa log" | "Restaurant profile" | "Menu";
@@ -11,7 +12,7 @@ type BusinessDay = { enabled: boolean; open: string; close: string };
 type Schedule = Record<DayName, BusinessDay>;
 
 const days: DayName[] = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
-const adminPages: AdminPage[] = ["Overview", "Menu", "Staff tracker", "M-Pesa log", "Restaurant profile"];
+const adminPages: AdminPage[] = ["Overview", "Menu", "Restaurant profile", "Staff tracker", "M-Pesa log"];
 
 const navigation: { id: Workspace; label: string; mark: string }[] = [
   { id: "customer", label: "Customer", mark: "CU" },
@@ -87,6 +88,9 @@ export default function Home() {
   const [detailPanel, setDetailPanel] = useState<"recommendations" | "complaints" | null>(null);
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [menuLoaded, setMenuLoaded] = useState(false);
+  const [restaurantProfile, setRestaurantProfile] = useState<RestaurantProfileData>(defaultRestaurantProfile);
+  const [profileLoaded, setProfileLoaded] = useState(false);
+  const [tableNumber, setTableNumber] = useState("");
 
   useEffect(() => {
     const loadMenu = window.setTimeout(() => {
@@ -113,6 +117,41 @@ export default function Home() {
       return;
     }
   }, [menuItems, menuLoaded]);
+
+  useEffect(() => {
+    const loadProfile = window.setTimeout(() => {
+      try {
+        const storedProfile = window.localStorage.getItem("room.restaurant-profile.v1");
+        if (storedProfile) {
+          const parsedProfile: unknown = JSON.parse(storedProfile);
+          if (parsedProfile && typeof parsedProfile === "object") {
+            setRestaurantProfile({ ...defaultRestaurantProfile, ...(parsedProfile as Partial<RestaurantProfileData>) });
+          }
+        }
+      } catch {
+        window.localStorage.removeItem("room.restaurant-profile.v1");
+      }
+      setProfileLoaded(true);
+    }, 0);
+
+    return () => window.clearTimeout(loadProfile);
+  }, []);
+
+  useEffect(() => {
+    if (!profileLoaded) return;
+    try {
+      window.localStorage.setItem("room.restaurant-profile.v1", JSON.stringify(restaurantProfile));
+    } catch {
+      return;
+    }
+  }, [profileLoaded, restaurantProfile]);
+
+  useEffect(() => {
+    const readTableNumber = window.setTimeout(() => {
+      setTableNumber(new URLSearchParams(window.location.search).get("table") ?? "");
+    }, 0);
+    return () => window.clearTimeout(readTableNumber);
+  }, []);
 
   useEffect(() => {
     const updateScheduleStatus = () => setScheduledOpen(isOpenAt(new Date(), schedule));
@@ -240,7 +279,7 @@ export default function Home() {
           </div>
           <div className="topbar-meta">
             <span className="topbar-date">Live service</span>
-            <span className="user-avatar" aria-label="Signed out">R</span>
+            {restaurantProfile.logo ? <Image src={restaurantProfile.logo} alt="" className="user-avatar profile-avatar-image" width={32} height={32} unoptimized /> : <span className="user-avatar" aria-label="Restaurant profile">R</span>}
           </div>
         </header>
 
@@ -404,6 +443,12 @@ export default function Home() {
                 onSaveItems={saveMenuItems}
                 onDeleteItem={(id) => setMenuItems((current) => current.filter((item) => item.id !== id))}
               />
+            ) : adminPage === "Restaurant profile" ? (
+              profileLoaded ? (
+                <RestaurantProfile initialProfile={restaurantProfile} onSave={setRestaurantProfile} />
+              ) : (
+                <section className="panel placeholder-panel"><p className="eyebrow">RESTAURANT SETUP</p><h2>Loading profile</h2></section>
+              )
             ) : (
               <section className="panel placeholder-panel">
                 <p className="eyebrow">ADMIN WORKSPACE</p>
@@ -416,9 +461,10 @@ export default function Home() {
           <main className="page-content customer-content">
             <div className="customer-kicker"><span className="eyebrow">YOUR RESTAURANT, AT A GLANCE</span><span className={`customer-open-state${restaurantIsOpen ? " is-open" : ""}`}><i className="status-dot" />{restaurantIsOpen ? "Open now" : "Currently closed"}</span></div>
             <section className="customer-welcome">
-              <div className="customer-welcome-copy"><p className="eyebrow">WELCOME</p><h1>A good meal is<br />closer than you think.</h1><p>The restaurant menu and online ordering will appear here once they&apos;re set up.</p><button className="primary-button" type="button" onClick={() => selectWorkspace("admin")}>Restaurant team <span aria-hidden="true">→</span></button></div>
+              <div className="customer-welcome-copy"><p className="eyebrow">{restaurantProfile.name || "WELCOME"}</p><h1>{restaurantProfile.name || "A good meal is closer than you think."}</h1><p>{restaurantProfile.welcomeMessage || "The restaurant menu and online ordering will appear here once they&apos;re set up."}</p>{restaurantProfile.famousDish && <div className="customer-famous-dish"><span>HOUSE FAVORITE</span><strong>{restaurantProfile.famousDish}</strong></div>}<button className="primary-button" type="button" onClick={() => selectWorkspace("admin")}>Restaurant team <span aria-hidden="true">→</span></button></div>
               <div className="customer-visual" aria-hidden="true"><div className="plate plate-back" /><div className="plate plate-front"><span className="plate-center" /></div><span className="visual-leaf leaf-one" /><span className="visual-leaf leaf-two" /><span className="visual-dot dot-one" /><span className="visual-dot dot-two" /><span className="visual-caption">MADE FRESH<br />SERVED WITH CARE</span></div>
             </section>
+            {tableNumber && <p className="customer-table-notice">You&apos;re viewing table {tableNumber}.</p>}
             {menuItems.length > 0 ? (
               <section className="customer-menu-section">
                 <div className="customer-menu-heading"><div><p className="eyebrow">THE MENU</p><h2>Made fresh for you.</h2></div><span>{menuItems.length} {menuItems.length === 1 ? "dish" : "dishes"}</span></div>
@@ -437,6 +483,8 @@ export default function Home() {
                 <div className="menu-empty-stamp">MENU<br />COMING<br />SOON</div>
               </section>
             )}
+            {restaurantProfile.photos.length > 0 && <section className="customer-gallery"><div><p className="eyebrow">AT THE RESTAURANT</p><h2>A place to settle in.</h2></div><div className="customer-gallery-grid">{restaurantProfile.photos.map((photo, index) => <div className="customer-gallery-photo" key={`${photo.slice(0, 30)}-${index}`}><Image src={photo} alt={`${restaurantProfile.name || "Restaurant"} interior ${index + 1}`} fill sizes="(max-width: 650px) 100vw, 33vw" unoptimized /></div>)}</div></section>}
+            {(restaurantProfile.phone || restaurantProfile.email || restaurantProfile.address) && <section className="customer-contact-strip"><div><p className="eyebrow">PLAN YOUR VISIT</p><h2>We&apos;d love to see you.</h2></div><div className="customer-contact-details">{restaurantProfile.address && <span>{restaurantProfile.address}</span>}{restaurantProfile.phone && <a href={`tel:${restaurantProfile.phone}`}>{restaurantProfile.phone}</a>}{restaurantProfile.email && <a href={`mailto:${restaurantProfile.email}`}>{restaurantProfile.email}</a>}{getMapsHref(restaurantProfile) && <a className="customer-maps-link" href={getMapsHref(restaurantProfile)} target="_blank" rel="noreferrer">Open in Google Maps <span aria-hidden="true">↗</span></a>}</div></section>}
           </main>
         ) : (
           <main className="page-content role-placeholder-content">
