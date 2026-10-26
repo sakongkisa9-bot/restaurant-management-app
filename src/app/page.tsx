@@ -2,8 +2,9 @@
 
 import Image from "next/image";
 import { useEffect, useState } from "react";
+import { CustomerExperience } from "./customer-experience";
 import { MenuManagement, type MenuItem } from "./menu-management";
-import { defaultRestaurantProfile, getMapsHref, RestaurantProfile, type RestaurantProfileData } from "./restaurant-profile";
+import { defaultRestaurantProfile, RestaurantProfile, type RestaurantProfileData } from "./restaurant-profile";
 
 type Workspace = "customer" | "admin" | "waiter" | "cook" | "cashier" | "developer";
 type AdminPage = "Overview" | "Staff tracker" | "M-Pesa log" | "Restaurant profile" | "Menu";
@@ -458,34 +459,7 @@ export default function Home() {
             )}
           </main>
         ) : workspace === "customer" ? (
-          <main className="page-content customer-content">
-            <div className="customer-kicker"><span className="eyebrow">YOUR RESTAURANT, AT A GLANCE</span><span className={`customer-open-state${restaurantIsOpen ? " is-open" : ""}`}><i className="status-dot" />{restaurantIsOpen ? "Open now" : "Currently closed"}</span></div>
-            <section className="customer-welcome">
-              <div className="customer-welcome-copy"><p className="eyebrow">{restaurantProfile.name || "WELCOME"}</p><h1>{restaurantProfile.name || "A good meal is closer than you think."}</h1><p>{restaurantProfile.welcomeMessage || "The restaurant menu and online ordering will appear here once they&apos;re set up."}</p>{restaurantProfile.famousDish && <div className="customer-famous-dish"><span>HOUSE FAVORITE</span><strong>{restaurantProfile.famousDish}</strong></div>}<button className="primary-button" type="button" onClick={() => selectWorkspace("admin")}>Restaurant team <span aria-hidden="true">→</span></button></div>
-              <div className="customer-visual" aria-hidden="true"><div className="plate plate-back" /><div className="plate plate-front"><span className="plate-center" /></div><span className="visual-leaf leaf-one" /><span className="visual-leaf leaf-two" /><span className="visual-dot dot-one" /><span className="visual-dot dot-two" /><span className="visual-caption">MADE FRESH<br />SERVED WITH CARE</span></div>
-            </section>
-            {tableNumber && <p className="customer-table-notice">You&apos;re viewing table {tableNumber}.</p>}
-            {menuItems.length > 0 ? (
-              <section className="customer-menu-section">
-                <div className="customer-menu-heading"><div><p className="eyebrow">THE MENU</p><h2>Made fresh for you.</h2></div><span>{menuItems.length} {menuItems.length === 1 ? "dish" : "dishes"}</span></div>
-                <div className="customer-menu-grid">
-                  {menuItems.map((item) => (
-                    <article className="customer-food-card" key={item.id}>
-                      {item.image ? <Image src={item.image} alt={item.name} className="customer-food-image" width={500} height={320} unoptimized /> : <div className="customer-food-placeholder" aria-hidden="true">{item.name.slice(0, 1).toUpperCase()}</div>}
-                      <div className="customer-food-copy"><div className="food-card-tags"><span>{item.category}</span><span>{item.mealPeriod}</span></div><h3>{item.name}</h3><p>{item.description}</p><strong>KSh {item.price.toLocaleString("en-KE")}</strong></div>
-                    </article>
-                  ))}
-                </div>
-              </section>
-            ) : (
-              <section className="customer-menu-empty">
-                <div><p className="eyebrow">THE MENU</p><h2>Something delicious is on its way.</h2><p>Check back soon to explore dishes, drinks, and today&apos;s specials.</p></div>
-                <div className="menu-empty-stamp">MENU<br />COMING<br />SOON</div>
-              </section>
-            )}
-            {restaurantProfile.photos.length > 0 && <section className="customer-gallery"><div><p className="eyebrow">AT THE RESTAURANT</p><h2>A place to settle in.</h2></div><div className="customer-gallery-grid">{restaurantProfile.photos.map((photo, index) => <div className="customer-gallery-photo" key={`${photo.slice(0, 30)}-${index}`}><Image src={photo} alt={`${restaurantProfile.name || "Restaurant"} interior ${index + 1}`} fill sizes="(max-width: 650px) 100vw, 33vw" unoptimized /></div>)}</div></section>}
-            {(restaurantProfile.phone || restaurantProfile.email || restaurantProfile.address) && <section className="customer-contact-strip"><div><p className="eyebrow">PLAN YOUR VISIT</p><h2>We&apos;d love to see you.</h2></div><div className="customer-contact-details">{restaurantProfile.address && <span>{restaurantProfile.address}</span>}{restaurantProfile.phone && <a href={`tel:${restaurantProfile.phone}`}>{restaurantProfile.phone}</a>}{restaurantProfile.email && <a href={`mailto:${restaurantProfile.email}`}>{restaurantProfile.email}</a>}{getMapsHref(restaurantProfile) && <a className="customer-maps-link" href={getMapsHref(restaurantProfile)} target="_blank" rel="noreferrer">Open in Google Maps <span aria-hidden="true">↗</span></a>}</div></section>}
-          </main>
+          <CustomerExperience items={menuItems} profile={restaurantProfile} isOpen={restaurantIsOpen} tableNumber={tableNumber} />
         ) : (
           <main className="page-content role-placeholder-content">
             <section className="placeholder-panel">

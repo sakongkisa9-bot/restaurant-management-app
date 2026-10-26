@@ -9,6 +9,11 @@ export type MenuItem = {
   price: number;
   description: string;
   image: string;
+  images?: string[];
+  specifications?: string[];
+  available?: boolean;
+  rating?: number;
+  ratingCount?: number;
   category: string;
   mealPeriod: string;
   orderCount: number;
@@ -31,6 +36,8 @@ function editableFields(item: MenuItem): EditableFields {
     price: item.price,
     description: item.description,
     image: item.image,
+    images: item.images ?? (item.image ? [item.image] : []),
+    specifications: item.specifications ?? [],
     category: item.category,
     mealPeriod: item.mealPeriod,
   };
@@ -42,11 +49,14 @@ export function MenuManagement({ items, onAddItem, onSaveItems, onDeleteItem }: 
   const [drafts, setDrafts] = useState<Record<string, EditableFields>>({});
   const [showAllBest, setShowAllBest] = useState(false);
   const [error, setError] = useState("");
+  const [specificationInput, setSpecificationInput] = useState("");
   const [foodForm, setFoodForm] = useState({
     name: "",
     price: "",
     description: "",
     image: "",
+    images: [] as string[],
+    specifications: [] as string[],
     category: categories[0],
     mealPeriod: mealPeriods[1],
   });
@@ -121,25 +131,59 @@ export function MenuManagement({ items, onAddItem, onSaveItems, onDeleteItem }: 
   }
 
   function handleImageChange(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    if (!file.type.startsWith("image/")) {
+    const files = Array.from(event.target.files ?? []);
+    event.target.value = "";
+    if (!files.length) return;
+    if (foodForm.images.length + files.length > 4) {
+      setError("Add up to 4 food photos.");
+      return;
+    }
+    if (files.some((file) => !file.type.startsWith("image/"))) {
       setError("Choose an image file.");
       return;
     }
-    if (file.size > 2 * 1024 * 1024) {
-      setError("Images must be 2 MB or smaller for this local preview.");
+    if (files.some((file) => file.size > 350 * 1024)) {
+      setError("Food photos must be 350 KB or smaller in this browser preview.");
       return;
     }
 
-    const reader = new FileReader();
-    reader.addEventListener("load", () => {
-      if (typeof reader.result === "string") {
-        setFoodForm((current) => ({ ...current, image: reader.result as string }));
-        setError("");
-      }
+    Promise.all(files.map((file) => new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.addEventListener("load", () => typeof reader.result === "string" ? resolve(reader.result) : reject(new Error("Could not read image.")));
+      reader.addEventListener("error", () => reject(new Error("Could not read image.")));
+      reader.readAsDataURL(file);
+    }))).then((images) => {
+      setFoodForm((current) => {
+        const nextImages = [...current.images, ...images];
+        return { ...current, images: nextImages, image: nextImages[0] ?? "" };
+      });
+      setError("");
+    }).catch(() => {
+      setError("We couldn’t read one of those photos. Try another image.");
     });
-    reader.readAsDataURL(file);
+  }
+
+  function addSpecification() {
+    const value = specificationInput.trim();
+    if (!value) return;
+    if (foodForm.specifications.some((item) => item.toLowerCase() === value.toLowerCase())) {
+      setError("That specification option has already been added.");
+      return;
+    }
+    setFoodForm((current) => ({ ...current, specifications: [...current.specifications, value] }));
+    setSpecificationInput("");
+    setError("");
+  }
+
+  function removeFoodImage(index: number) {
+    setFoodForm((current) => {
+      const images = current.images.filter((_, imageIndex) => imageIndex !== index);
+      return { ...current, images, image: images[0] ?? "" };
+    });
+  }
+
+  function removeSpecification(value: string) {
+    setFoodForm((current) => ({ ...current, specifications: current.specifications.filter((item) => item !== value) }));
   }
 
   function addFood(event: FormEvent<HTMLFormElement>) {
@@ -159,12 +203,17 @@ export function MenuManagement({ items, onAddItem, onSaveItems, onDeleteItem }: 
       name: foodForm.name.trim(),
       price,
       description: foodForm.description.trim(),
-      image: foodForm.image,
+      image: foodForm.images[0] ?? "",
+      images: foodForm.images,
+      specifications: foodForm.specifications,
+      available: true,
+      rating: 0,
+      ratingCount: 0,
       category: foodForm.category,
       mealPeriod: foodForm.mealPeriod,
       orderCount: 0,
     });
-    setFoodForm({ name: "", price: "", description: "", image: "", category: categories[0], mealPeriod: mealPeriods[1] });
+    setFoodForm({ name: "", price: "", description: "", image: "", images: [], specifications: [], category: categories[0], mealPeriod: mealPeriods[1] });
     setError("");
     setView("list");
   }
@@ -194,16 +243,18 @@ export function MenuManagement({ items, onAddItem, onSaveItems, onDeleteItem }: 
           </div>
           <form className="food-form" onSubmit={addFood}>
             <label className="food-image-upload">
-              {foodForm.image ? <Image src={foodForm.image} alt="Food preview" width={120} height={90} unoptimized /> : <span className="upload-mark">+</span>}
-              <span><strong>{foodForm.image ? "Change food photo" : "Add a food photo"}</strong><small>JPG, PNG or WebP · up to 2 MB</small></span>
-              <input className="visually-hidden" type="file" accept="image/*" onChange={handleImageChange} />
+              {foodForm.images[0] ? <Image src={foodForm.images[0]} alt="Food preview" width={120} height={90} unoptimized /> : <span className="upload-mark">+</span>}
+              <span><strong>{foodForm.images.length ? "Add another food photo" : "Add food photos"}</strong><small>{foodForm.images.length}/4 photos · up to 350 KB each</small></span>
+              <input className="visually-hidden" type="file" accept="image/*" multiple onChange={handleImageChange} />
             </label>
+            {foodForm.images.length > 0 && <div className="food-image-previews">{foodForm.images.map((image, index) => <div className="food-image-preview" key={`${image.slice(0, 30)}-${index}`}><Image src={image} alt={`Food photo ${index + 1}`} width={70} height={58} unoptimized /><button type="button" aria-label={`Remove food photo ${index + 1}`} onClick={() => removeFoodImage(index)}>×</button></div>)}</div>}
             <div className="food-form-fields">
               <label className="menu-field menu-field-wide"><span>Food name</span><input autoFocus maxLength={80} placeholder="e.g. Swahili chicken pilau" value={foodForm.name} onChange={(event) => setFoodForm((current) => ({ ...current, name: event.target.value }))} /></label>
               <label className="menu-field"><span>Price <small>KSh</small></span><input inputMode="decimal" min="1" placeholder="0" type="number" value={foodForm.price} onChange={(event) => setFoodForm((current) => ({ ...current, price: event.target.value }))} /></label>
               <label className="menu-field"><span>Category</span><select value={foodForm.category} onChange={(event) => setFoodForm((current) => ({ ...current, category: event.target.value }))}>{categories.map((category) => <option key={category}>{category}</option>)}</select></label>
               <label className="menu-field"><span>Meal period</span><select value={foodForm.mealPeriod} onChange={(event) => setFoodForm((current) => ({ ...current, mealPeriod: event.target.value }))}>{mealPeriods.map((meal) => <option key={meal}>{meal}</option>)}</select></label>
               <label className="menu-field menu-field-wide"><span>Short description</span><textarea maxLength={180} placeholder="Describe the dish in a few words" rows={3} value={foodForm.description} onChange={(event) => setFoodForm((current) => ({ ...current, description: event.target.value }))} /></label>
+              <div className="menu-field menu-field-wide specification-field"><span>Customer specifications <small>Optional · e.g. Hot, Cold</small></span><div className="specification-entry"><input aria-label="Specification option" maxLength={32} placeholder="Add an option" value={specificationInput} onChange={(event) => setSpecificationInput(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); addSpecification(); } }} /><button className="secondary-button" type="button" onClick={addSpecification}>Add option</button></div>{foodForm.specifications.length > 0 && <div className="specification-chips">{foodForm.specifications.map((specification) => <span key={specification}>{specification}<button type="button" onClick={() => removeSpecification(specification)} aria-label={`Remove ${specification}`}>×</button></span>)}</div>}</div>
             </div>
             {error && <p className="menu-error" role="alert">{error}</p>}
             <div className="food-form-actions"><button className="secondary-button" type="button" onClick={() => { setError(""); setView("list"); }}>Cancel</button><button className="primary-button" type="submit">Save food</button></div>
@@ -228,7 +279,7 @@ export function MenuManagement({ items, onAddItem, onSaveItems, onDeleteItem }: 
                   return (
                     <div className={`menu-row${isEditing ? " is-editing" : ""}`} key={item.id}>
                       <div className="menu-food-cell">
-                        {draft.image ? <Image className="menu-food-thumb" src={draft.image} alt="" width={58} height={50} unoptimized /> : <span className="menu-food-thumb menu-thumb-placeholder">{draft.name.slice(0, 1).toUpperCase() || "M"}</span>}
+                        {draft.image ? <Image className="menu-food-thumb" src={draft.image} alt="" width={48} height={44} unoptimized /> : <span className="menu-food-thumb menu-thumb-placeholder">{draft.name.slice(0, 1).toUpperCase() || "M"}</span>}
                         <div className="menu-food-details">
                           {isEditing ? <input aria-label={`${item.name} food name`} className="row-input row-name-input" maxLength={80} value={draft.name} onChange={(event) => updateDraft(item, "name", event.target.value)} /> : <strong>{item.name}</strong>}
                           {isEditing ? <input aria-label={`${item.name} description`} className="row-input row-description-input" maxLength={180} value={draft.description} onChange={(event) => updateDraft(item, "description", event.target.value)} /> : <span>{item.description || "No description"}</span>}
@@ -246,7 +297,7 @@ export function MenuManagement({ items, onAddItem, onSaveItems, onDeleteItem }: 
             )}
           </section>
 
-          <div className="add-food-row"><span>Ready to expand the menu?</span><button className="primary-button" type="button" onClick={() => { setFoodForm({ name: "", price: "", description: "", image: "", category: categories[0], mealPeriod: mealPeriods[1] }); setError(""); setView("add"); }}><span className="button-symbol">+</span> Add new food</button></div>
+          <div className="add-food-row"><span>Ready to expand the menu?</span><button className="primary-button" type="button" onClick={() => { setFoodForm({ name: "", price: "", description: "", image: "", images: [], specifications: [], category: categories[0], mealPeriod: mealPeriods[1] }); setError(""); setView("add"); }}><span className="button-symbol">+</span> Add new food</button></div>
 
           <section className="panel menu-best-panel">
             <div className="section-heading"><div><p className="eyebrow">ORDER TRENDS</p><h2>Best foods</h2></div><button className="text-button" type="button" disabled={items.length === 0} onClick={() => setShowAllBest((current) => !current)}>{showAllBest ? "Show top three" : "View all"} <span aria-hidden="true">→</span></button></div>
