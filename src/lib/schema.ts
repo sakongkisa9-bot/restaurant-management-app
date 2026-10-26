@@ -1,0 +1,90 @@
+import { pgTable, text, integer, boolean, timestamp, jsonb, uuid, serial } from "drizzle-orm/pg-core";
+
+export const restaurants = pgTable("restaurants", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  slug: text("slug").notNull().unique(),
+  name: text("name").notNull(),
+  logo: text("logo"),
+  phone: text("phone"),
+  email: text("email"),
+  address: text("address"),
+  mapsUrl: text("maps_url"),
+  welcomeMessage: text("welcome_message"),
+  famousDish: text("famous_dish"),
+  photos: jsonb("photos").default([]),
+  paymentMethod: text("payment_method").default("Till number"),
+  paymentNumber: text("payment_number"),
+  tableCount: integer("table_count").default(12),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const staffMembers = pgTable("staff_members", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  restaurantId: uuid("restaurant_id").notNull(),
+  staffCode: text("staff_code").notNull(),
+  name: text("name").notNull(),
+  role: text("role").notNull(),
+  passportPhoto: text("passport_photo"),
+  phone: text("phone"),
+  email: text("email"),
+  passwordHash: text("password_hash").notNull(),
+  salary: integer("salary"),
+  salaryPayments: jsonb("salary_payments").default({}),
+  ordersTaken: integer("orders_taken").default(0),
+  revenueGenerated: integer("revenue_generated").default(0),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const menuItems = pgTable("menu_items", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  restaurantId: uuid("restaurant_id").notNull(),
+  name: text("name").notNull(),
+  description: text("description").default(""),
+  image: text("image"),
+  images: jsonb("images").default([]),
+  specifications: jsonb("specifications").default([]),
+  category: text("category").notNull(),
+  mealPeriod: text("meal_period").notNull(),
+  price: integer("price").notNull(),
+  available: boolean("available").default(true),
+  orderCount: integer("order_count").default(0),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const customerFeedback = pgTable("customer_feedback", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  restaurantId: uuid("restaurant_id").notNull(),
+  type: text("type").notNull(),
+  message: text("message").notNull(),
+  orderNumber: text("order_number"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const orders = pgTable("orders", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  restaurantId: uuid("restaurant_id").notNull(),
+  tableNumber: integer("table_number").notNull(),
+  orderNumber: text("order_number").notNull(),
+  status: text("status").notNull().default("confirmed"),
+  total: integer("total").notNull().default(0),
+  billRequested: boolean("bill_requested").default(false),
+  waiterCalled: boolean("waiter_called").default(false),
+  paymentStatus: text("payment_status").default("unpaid"),
+  invoiceNumber: text("invoice_number"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const orderLines = pgTable("order_lines", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  orderId: uuid("order_id").notNull(),
+  itemId: uuid("item_id"),
+  itemName: text("item_name").notNull(),
+  quantity: integer("quantity").notNull(),
+  price: integer("price").notNull(),
+  specification: text("specification"),
+  createdAt: timestamp("created_at").defaultNow(),
+});

@@ -3,8 +3,10 @@
 import Image from "next/image";
 import { QRCodeSVG } from "qrcode.react";
 import { useEffect, useState, type ChangeEvent, type FormEvent } from "react";
+import { slugify } from "../lib/tenant";
 
 export type RestaurantProfileData = {
+  slug: string;
   name: string;
   logo: string;
   phone: string;
@@ -29,6 +31,7 @@ const photoLimit = 6;
 const paymentMethods = ["Till number", "Paybill", "Pochi la Biashara", "Phone number"];
 
 export const defaultRestaurantProfile: RestaurantProfileData = {
+  slug: "",
   name: "",
   logo: "",
   phone: "",
@@ -77,6 +80,7 @@ export function RestaurantProfile({ initialProfile, onSave }: RestaurantProfileP
   const [qrOpen, setQrOpen] = useState(false);
   const [qrOrigin, setQrOrigin] = useState("");
   const [qrSelection, setQrSelection] = useState("all");
+  const restaurantSlug = profile.slug || slugify(profile.name);
 
   useEffect(() => {
     const readOrigin = window.setTimeout(() => setQrOrigin(window.location.origin), 0);
@@ -156,7 +160,7 @@ export function RestaurantProfile({ initialProfile, onSave }: RestaurantProfileP
       return;
     }
 
-    const nextProfile = { ...profile, name: profile.name.trim() };
+    const nextProfile = { ...profile, name: profile.name.trim(), slug: profile.slug || slugify(profile.name.trim()) };
     onSave(nextProfile);
     setProfile(nextProfile);
     setSavedProfile(nextProfile);
@@ -172,7 +176,12 @@ export function RestaurantProfile({ initialProfile, onSave }: RestaurantProfileP
 
   const mapsHref = getMapsHref(profile);
   const tableNumbers = Array.from({ length: profile.tableCount }, (_, index) => index + 1);
-  const selectedTables = qrSelection === "all" ? tableNumbers : tableNumbers.filter((number) => number === Number(qrSelection));
+  const generalRestaurantUrl = `${qrOrigin}/?restaurant=${encodeURIComponent(restaurantSlug)}`;
+  const qrCards = qrSelection === "general"
+    ? [{ label: "GENERAL QR", url: generalRestaurantUrl }]
+    : qrSelection === "all"
+      ? tableNumbers.map((number) => ({ label: `TABLE ${String(number).padStart(2, "0")}`, url: `${qrOrigin}/?restaurant=${encodeURIComponent(restaurantSlug)}&table=${number}` }))
+      : [{ label: `TABLE ${String(Number(qrSelection)).padStart(2, "0")}`, url: `${qrOrigin}/?restaurant=${encodeURIComponent(restaurantSlug)}&table=${Number(qrSelection)}` }];
 
   return (
     <div className="profile-workspace">
@@ -238,8 +247,8 @@ export function RestaurantProfile({ initialProfile, onSave }: RestaurantProfileP
         <div className="modal-backdrop qr-modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && setQrOpen(false)}>
           <section className="qr-dialog" role="dialog" aria-modal="true" aria-labelledby="qr-dialog-title">
             <div className="qr-dialog-heading"><div><p className="eyebrow">TABLE SERVICE</p><h2 id="qr-dialog-title">Table QR codes</h2><p>Scan a code to open the customer page for that table.</p></div><button className="dialog-close" type="button" aria-label="Close QR codes" onClick={() => setQrOpen(false)}>×</button></div>
-            <div className="qr-toolbar"><label className="qr-select-field"><span>Show</span><select value={qrSelection} onChange={(event) => setQrSelection(event.target.value)}><option value="all">All {tableNumbers.length} tables</option>{tableNumbers.map((number) => <option value={number} key={number}>Table {number}</option>)}</select></label><button className="secondary-button" type="button" onClick={() => window.print()}>Print codes</button></div>
-            <div className="qr-grid">{selectedTables.map((number) => { const url = `${qrOrigin}/?table=${number}`; return <article className="qr-table-card" key={number}><QRCodeSVG value={url} size={112} level="M" includeMargin /><strong>TABLE {String(number).padStart(2, "0")}</strong><span>{url}</span></article>; })}</div>
+            <div className="qr-toolbar"><label className="qr-select-field"><span>Show</span><select value={qrSelection} onChange={(event) => setQrSelection(event.target.value)}><option value="general">Restaurant general link</option><option value="all">All {tableNumbers.length} tables</option>{tableNumbers.map((number) => <option value={number} key={number}>Table {number}</option>)}</select></label><button className="secondary-button" type="button" onClick={() => window.print()}>Print codes</button></div>
+            <div className="qr-grid">{qrCards.map((card) => <article className="qr-table-card" key={card.label}><QRCodeSVG value={card.url} size={112} level="M" includeMargin /><strong>{card.label}</strong><span>{card.url}</span></article>)}</div>
           </section>
         </div>
       )}
