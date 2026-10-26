@@ -1,12 +1,27 @@
 "use client";
 
 import Image from "next/image";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import type { MenuItem } from "./menu-management";
 import type { RestaurantProfileData } from "./restaurant-profile";
 
 type CustomerPage = "Menu" | "My order" | "Booking";
 type CartEntry = { itemId: string; quantity: number; specification: string };
+type OrderStatus = "confirmed" | "cooking" | "ready" | "completed";
+type ConfirmedOrder = {
+  id: string;
+  number: string;
+  lines: Array<CartEntry & { name: string; price: number; image: string }>;
+  total: number;
+  tableNumber: string;
+  status: OrderStatus;
+  createdAt: string;
+  billRequested: boolean;
+  waiterCalled: boolean;
+  paymentStatus: "unpaid" | "pending" | "paid";
+  invoiceNumber?: string;
+  ratings?: Record<string, number>;
+};
 type CustomerExperienceProps = {
   items: MenuItem[];
   profile: RestaurantProfileData;
@@ -29,6 +44,15 @@ export function CustomerExperience({ items, profile, isOpen, tableNumber }: Cust
   const [restaurantImageIndex, setRestaurantImageIndex] = useState(0);
   const [selectedSpecifications, setSelectedSpecifications] = useState<Record<string, string>>({});
   const [cart, setCart] = useState<CartEntry[]>([]);
+  const [confirmedOrder, setConfirmedOrder] = useState<ConfirmedOrder | null>(null);
+  const [orderLoaded, setOrderLoaded] = useState(false);
+  const [paymentOpen, setPaymentOpen] = useState(false);
+  const [paymentCopyMessage, setPaymentCopyMessage] = useState("");
+  const [orderNotice, setOrderNotice] = useState("");
+  const [feedbackType, setFeedbackType] = useState<"recommendation" | "complaint">("recommendation");
+  const [feedbackText, setFeedbackText] = useState("");
+  const [feedbackMessage, setFeedbackMessage] = useState("");
+  const [ratingMessage, setRatingMessage] = useState("");
   const [bookingMessage, setBookingMessage] = useState("");
   const [guestCount, setGuestCount] = useState("2");
 
@@ -39,6 +63,7 @@ export function CustomerExperience({ items, profile, isOpen, tableNumber }: Cust
     const item = items.find((menuItem) => menuItem.id === entry.itemId);
     return total + (item?.price ?? 0) * entry.quantity;
   }, 0);
+  const orderActive = Boolean(confirmedOrder && confirmedOrder.status !== "completed");
   const restaurantPhotos = profile.photos;
 
   useEffect(() => {
@@ -47,13 +72,39 @@ export function CustomerExperience({ items, profile, isOpen, tableNumber }: Cust
     return () => window.clearInterval(timer);
   }, [restaurantPhotos.length]);
 
+  useEffect(() => {
+    const loadOrder = window.setTimeout(() => {
+      try {
+        const storedOrder = window.localStorage.getItem("room.customer-order.v1");
+        if (storedOrder) {
+          const parsedOrder: unknown = JSON.parse(storedOrder);
+          if (parsedOrder && typeof parsedOrder === "object") setConfirmedOrder(parsedOrder as ConfirmedOrder);
+        }
+      } catch {
+        window.localStorage.removeItem("room.customer-order.v1");
+      }
+      setOrderLoaded(true);
+    }, 0);
+    return () => window.clearTimeout(loadOrder);
+  }, []);
+
+  useEffect(() => {
+    if (!orderLoaded) return;
+    try {
+      if (confirmedOrder) window.localStorage.setItem("room.customer-order.v1", JSON.stringify(confirmedOrder));
+      else window.localStorage.removeItem("room.customer-order.v1");
+    } catch {
+      return;
+    }
+  }, [confirmedOrder, orderLoaded]);
+
   function openDish(item: MenuItem) {
     setSelectedFood(item);
     setFoodImageIndex(0);
   }
 
   function addToCart() {
-    if (!selectedFood || selectedFood.available === false) return;
+    if (!selectedFood || selectedFood.available === false || orderActive) return;
     const specification = selectedSpecifications[selectedFood.id] ?? selectedFood.specifications?.[0] ?? "";
     setCart((current) => {
       const existing = current.find((entry) => entry.itemId === selectedFood.id && entry.specification === specification);
@@ -72,7 +123,77 @@ export function CustomerExperience({ items, profile, isOpen, tableNumber }: Cust
     }));
   }
 
-  function submitBooking(event: React.FormEvent<HTMLFormElement>) {
+  function confirmOrder() {
+    if (cart.length === 0 || orderActive) return;
+    const lines = cart.flatMap((entry) => {
+      const item = items.find((candidate) => candidate.id === entry.itemId);
+      return item ? [{ ...entry, name: item.name, price: item.price, image: dishImages(item)[0] ?? "" }] : [];
+    });
+    if (!lines.length) return;
+
+    setConfirmedOrder({
+      id: crypto.randomUUID(),
+      number: `RH-${Date.now().toString().slice(-6)}`,
+      lines,
+      total: lines.reduce((total, line) => total + line.price * line.quantity, 0),
+      tableNumber,
+      status: "confirmed",
+      createdAt: new Date().toISOString(),
+      billRequested: false,
+      waiterCalled: false,
+      paymentStatus: "unpaid",
+    });
+    setCart([]);
+    setOrderNotice("");
+  }
+
+  function requestService(request: "bill" | "waiter") {
+    setConfirmedOrder((current) => current ? { ...current, [request === "bill" ? "billRequested" : "waiterCalled"]: true } : current);
+    setOrderNotice(request === "bill" ? "Bill request recorded. Cashier notifications will connect when staff tools are set up." : "Waiter request recorded. Live waiter notifications will connect when staff tools are set up.");
+  }
+
+  function submitFeedback(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!feedbackText.trim()) {
+      setFeedbackMessage("Write a short message before submitting.");
+      return;
+    }
+
+    try {
+      const current: unknown = JSON.parse(window.localStorage.getItem("room.customer-feedback.v1") ?? "[]");
+      const feedback = Array.isArray(current) ? current : [];
+      feedback.push({ id: crypto.randomUUID(), type: feedbackType, message: feedbackText.trim(), orderNumber: confirmedOrder?.number ?? null, createdAt: new Date().toISOString() });
+      window.localStorage.setItem("room.customer-feedback.v1", JSON.stringify(feedback));
+      setFeedbackText("");
+      setFeedbackMessage(`${feedbackType === "recommendation" ? "Recommendation" : "Complaint"} saved in this browser preview.`);
+    } catch {
+      setFeedbackMessage("Feedback could not be saved in this browser.");
+    }
+  }
+
+  function submitRating(itemId: string, rating: number) {
+    if (!confirmedOrder || confirmedOrder.status !== "ready") return;
+    setConfirmedOrder((current) => current ? { ...current, ratings: { ...current.ratings, [itemId]: rating } } : current);
+    setRatingMessage("Thank you for rating your order.");
+  }
+
+  function submitPaymentIntent() {
+    if (!confirmedOrder || confirmedOrder.paymentStatus !== "unpaid") return;
+    setConfirmedOrder((current) => current ? { ...current, paymentStatus: "pending" } : current);
+    setPaymentCopyMessage("Payment reported. It will remain pending until verified by the payment service or cashier.");
+  }
+
+  async function copyPaymentNumber() {
+    if (!profile.paymentNumber) return;
+    try {
+      await navigator.clipboard.writeText(profile.paymentNumber);
+      setPaymentCopyMessage("Payment number copied.");
+    } catch {
+      setPaymentCopyMessage("Copy isn’t available here. Select the number to copy it.");
+    }
+  }
+
+  function submitBooking(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setBookingMessage("Booking requests will be enabled in the reservations setup.");
   }
@@ -144,11 +265,25 @@ export function CustomerExperience({ items, profile, isOpen, tableNumber }: Cust
         </section>;
       })()}
 
-      {!selectedFood && activePage === "My order" && <section className="customer-subpage">
-        <div className="customer-subpage-heading"><div><p className="eyebrow">YOUR SELECTION</p><h1>My order</h1><p>Review your choices before we build the order-completion flow.</p></div><span className="order-count-pill">{cartCount} {cartCount === 1 ? "item" : "items"}</span></div>
-        {cart.length === 0 ? <div className="customer-empty-order"><span className="empty-icon">0</span><h2>Your order is empty</h2><p>Browse the menu and add something you love.</p><button className="primary-button" type="button" onClick={() => setActivePage("Menu")}>Browse menu <span aria-hidden="true">→</span></button></div> : <div className="order-review-layout"><div className="order-lines">{cart.map((entry) => { const item = items.find((candidate) => candidate.id === entry.itemId); if (!item) return null; const image = dishImages(item)[0]; return <article className="order-line" key={`${entry.itemId}-${entry.specification}`}>
-            {image ? <Image src={image} alt="" width={84} height={74} unoptimized /> : <span className="order-line-placeholder">{item.name.slice(0, 1)}</span>}<div className="order-line-info"><strong>{item.name}</strong>{entry.specification && <span>{entry.specification}</span>}<span>KSh {item.price.toLocaleString("en-KE")} each</span></div><div className="quantity-control"><button type="button" onClick={() => changeQuantity(entry, -1)} aria-label={`Remove one ${item.name}`}>−</button><span>{entry.quantity}</span><button type="button" onClick={() => changeQuantity(entry, 1)} aria-label={`Add one ${item.name}`}>+</button></div><strong className="order-line-total">KSh {(item.price * entry.quantity).toLocaleString("en-KE")}</strong>
-          </article>; })}<button className="text-button continue-menu-button" type="button" onClick={() => setActivePage("Menu")}>← Continue browsing</button></div><aside className="order-summary"><p className="eyebrow">ORDER SUMMARY</p><h2>Ready when you are.</h2><div><span>{cartCount} items</span><strong>KSh {cartTotal.toLocaleString("en-KE")}</strong></div><p>Order completion will be added in the next step.</p><button className="primary-button" type="button" disabled>Continue order</button></aside></div>}
+      {!selectedFood && activePage === "My order" && <section className="customer-subpage order-page">
+        <div className="customer-subpage-heading"><div><p className="eyebrow">YOUR SELECTION</p><h1>My order</h1><p>{orderActive && confirmedOrder ? `Order ${confirmedOrder.number} · placed ${new Intl.DateTimeFormat("en-KE", { hour: "numeric", minute: "2-digit" }).format(new Date(confirmedOrder.createdAt))}` : "Review your choices before confirming with the kitchen."}</p></div><span className={`order-count-pill${orderActive ? " is-tracking" : ""}`}>{orderActive ? "TRACKING" : `${cartCount} ${cartCount === 1 ? "item" : "items"}`}</span></div>
+        {!orderActive && cart.length === 0 ? <div className="customer-empty-order"><span className="empty-icon">0</span><h2>Your order is empty</h2><p>Browse the menu and add something you love.</p><button className="primary-button" type="button" onClick={() => setActivePage("Menu")}>Browse menu <span aria-hidden="true">→</span></button></div> : !orderActive && <div className="order-review-layout"><div className="order-lines"><div className="order-lines-heading"><div><p className="eyebrow">CART REVIEW</p><h2>Check your order</h2></div><span>{cartCount} {cartCount === 1 ? "item" : "items"}</span></div>{cart.map((entry) => { const item = items.find((candidate) => candidate.id === entry.itemId); if (!item) return null; const image = dishImages(item)[0]; return <article className="order-line" key={`${entry.itemId}-${entry.specification}`}>
+            {image ? <Image src={image} alt="" width={64} height={56} unoptimized /> : <span className="order-line-placeholder">{item.name.slice(0, 1)}</span>}<div className="order-line-info"><strong>{item.name}</strong>{entry.specification && <span>{entry.specification}</span>}<span>KSh {item.price.toLocaleString("en-KE")} each</span></div><div className="quantity-control"><button type="button" onClick={() => changeQuantity(entry, -1)} aria-label={`Remove one ${item.name}`}>−</button><span>{entry.quantity}</span><button type="button" onClick={() => changeQuantity(entry, 1)} aria-label={`Add one ${item.name}`}>+</button></div><strong className="order-line-total">KSh {(item.price * entry.quantity).toLocaleString("en-KE")}</strong>
+          </article>; })}<button className="text-button continue-menu-button" type="button" onClick={() => setActivePage("Menu")}>← Continue browsing</button></div><aside className="order-summary"><p className="eyebrow">ORDER SUMMARY</p><h2>Ready to send?</h2><div><span>{cartCount} {cartCount === 1 ? "item" : "items"}</span><strong>KSh {cartTotal.toLocaleString("en-KE")}</strong></div><p>Confirming sends this order to the kitchen.</p><button className="primary-button" type="button" onClick={confirmOrder}>Confirm order <span aria-hidden="true">→</span></button></aside></div>}
+
+        {orderActive && confirmedOrder && <>
+          <div className="confirmed-order-layout"><div className="confirmed-order-main">
+            <section className="order-tracker-panel"><div className="order-tracker-heading"><div><p className="eyebrow">KITCHEN STATUS</p><h2>{confirmedOrder.status === "ready" ? "Your order is ready" : confirmedOrder.status === "cooking" ? "The kitchen is cooking" : "Order received"}</h2></div><span className={`tracker-status status-${confirmedOrder.status}`}>{confirmedOrder.status === "confirmed" ? "CONFIRMED" : confirmedOrder.status.toUpperCase()}</span></div><div className="order-progress-steps">{(["confirmed", "cooking", "ready"] as const).map((status, index) => { const statusIndex = ["confirmed", "cooking", "ready"].indexOf(confirmedOrder.status); const currentIndex = index; const complete = statusIndex >= currentIndex; return <div className={`order-progress-step${complete ? " is-complete" : ""}${confirmedOrder.status === status ? " is-current" : ""}`} key={status}><span className="progress-step-mark">{complete ? "✓" : String(index + 1).padStart(2, "0")}</span><span>{status === "confirmed" ? "Received" : status === "cooking" ? "Cooking" : "Ready"}</span></div>; })}</div><p className="tracker-explanation">{confirmedOrder.status === "confirmed" ? "Order confirmed in this preview. Live kitchen updates will appear when cook tools are connected." : confirmedOrder.status === "cooking" ? "The cook is preparing your order." : "Please wait for your waiter to bring your order."}</p></section>
+            <section className="confirmed-lines-panel"><div className="confirmed-lines-heading"><div><p className="eyebrow">ORDER DETAILS</p><h2>Order {confirmedOrder.number}</h2></div>{confirmedOrder.tableNumber && <span className="order-table-tag">Table {confirmedOrder.tableNumber}</span>}</div>{confirmedOrder.lines.map((line) => <article className="confirmed-order-line" key={`${line.itemId}-${line.specification}`}>{line.image ? <Image src={line.image} alt="" width={64} height={56} unoptimized /> : <span className="order-line-placeholder">{line.name.slice(0, 1)}</span>}<div><strong>{line.name}</strong>{line.specification && <span>{line.specification}</span>}<small>{line.quantity} × KSh {line.price.toLocaleString("en-KE")}</small></div><strong>KSh {(line.quantity * line.price).toLocaleString("en-KE")}</strong></article>)}<div className="confirmed-total"><span>Total</span><strong>KSh {confirmedOrder.total.toLocaleString("en-KE")}</strong></div></section>
+            {orderNotice && <p className="order-action-notice" role="status">{orderNotice}</p>}
+            <section className="order-service-actions"><button className={`secondary-button${confirmedOrder.billRequested ? " is-requested" : ""}`} type="button" disabled={confirmedOrder.billRequested} onClick={() => requestService("bill")}><span className="service-action-symbol">B</span><span><strong>{confirmedOrder.billRequested ? "Bill requested" : "Request bill"}</strong><small>{confirmedOrder.billRequested ? "Cashier request recorded" : "Pay the cashier in person"}</small></span></button><button className={`secondary-button${confirmedOrder.waiterCalled ? " is-requested" : ""}`} type="button" disabled={confirmedOrder.waiterCalled} onClick={() => requestService("waiter")}><span className="service-action-symbol waiter-action-symbol">W</span><span><strong>{confirmedOrder.waiterCalled ? "Waiter called" : "Call waiter"}</strong><small>{confirmedOrder.waiterCalled ? "Request recorded" : "Ask for assistance"}</small></span></button><button className="primary-button" type="button" disabled={confirmedOrder.paymentStatus !== "unpaid"} onClick={() => { setPaymentOpen((current) => !current); setPaymentCopyMessage(""); }}><span className="service-action-symbol pay-action-symbol">KSh</span><span><strong>{confirmedOrder.paymentStatus === "pending" ? "Payment pending" : confirmedOrder.paymentStatus === "paid" ? "Paid" : "Pay directly"}</strong><small>{confirmedOrder.paymentStatus === "unpaid" ? "M-Pesa payment options" : "Awaiting payment verification"}</small></span></button></section>
+            {paymentOpen && <section className="payment-detail-panel"><div className="payment-detail-heading"><div><p className="eyebrow">M-PESA PAYMENT</p><h2>Pay KSh {confirmedOrder.total.toLocaleString("en-KE")}</h2></div><button className="dialog-close" type="button" aria-label="Close payment details" onClick={() => setPaymentOpen(false)}>×</button></div><p className="payment-detail-copy">Send the exact amount using the restaurant details below. This preview cannot verify payments.</p><dl className="payment-detail-list"><div><dt>Method</dt><dd>{profile.paymentMethod || "Not configured"}</dd></div><div><dt>Payment number</dt><dd>{profile.paymentNumber || "Not set in restaurant profile"}</dd></div>{profile.paymentMethod === "Paybill" && <div><dt>Account/reference</dt><dd>Order {confirmedOrder.number}</dd></div>}</dl><button className="copy-payment-button" type="button" disabled={!profile.paymentNumber} onClick={copyPaymentNumber}>{paymentCopyMessage.includes("copied") ? "Copied" : "Copy payment number"}</button><div className="stk-preview"><span><strong>Request STK push</strong><small>Secure M-Pesa confirmation will be enabled with server payment integration.</small></span><button className="secondary-button" type="button" disabled>STK push unavailable</button></div><button className="primary-button report-payment-button" type="button" disabled={!profile.paymentNumber || confirmedOrder.paymentStatus !== "unpaid"} onClick={submitPaymentIntent}>I&apos;ve sent the payment</button>{paymentCopyMessage && <p className="payment-status-message" role="status">{paymentCopyMessage}</p>}</section>}
+            {confirmedOrder.paymentStatus === "pending" && <p className="pending-payment-notice">Payment reported. It is not verified yet, so no invoice has been issued.</p>}
+            {confirmedOrder.paymentStatus === "paid" && confirmedOrder.invoiceNumber && <section className="invoice-panel"><p className="eyebrow">PAYMENT RECEIPT</p><h2>Invoice {confirmedOrder.invoiceNumber}</h2><p>Payment verified for KSh {confirmedOrder.total.toLocaleString("en-KE")}.</p></section>}
+            <section className="order-rating-panel"><div><p className="eyebrow">HOW WAS YOUR MEAL?</p><h2>{confirmedOrder.status === "ready" ? "Rate each dish" : "Rating opens when your order is ready"}</h2></div>{confirmedOrder.lines.map((line) => <div className="rating-line" key={line.itemId}><span>{line.name}</span><div aria-label={`Rate ${line.name} out of five stars`}>{[1, 2, 3, 4, 5].map((rating) => <button className={(confirmedOrder.ratings?.[line.itemId] ?? 0) >= rating ? "is-rated" : ""} key={rating} type="button" disabled={confirmedOrder.status !== "ready"} onClick={() => submitRating(line.itemId, rating)} aria-label={`${rating} star${rating === 1 ? "" : "s"}`}>★</button>)}</div></div>)}{ratingMessage && <p className="feedback-status-message" role="status">{ratingMessage}</p>}</section>
+          </div><aside className="active-order-aside"><p className="eyebrow">ORDER TOTAL</p><strong className="active-order-total">KSh {confirmedOrder.total.toLocaleString("en-KE")}</strong><span>Order {confirmedOrder.number}</span><span>{confirmedOrder.lines.reduce((count, line) => count + line.quantity, 0)} items</span><div className="aside-payment-status"><i className={`status-dot${confirmedOrder.paymentStatus === "paid" ? " available-dot" : ""}`} />{confirmedOrder.paymentStatus === "paid" ? "Paid" : confirmedOrder.paymentStatus === "pending" ? "Payment pending" : "Payment due"}</div></aside></div></>}
+
+        <section className="customer-feedback-panel"><div className="customer-feedback-heading"><div><p className="eyebrow">CUSTOMER VOICE</p><h2>Share feedback</h2><p>Tell us what you enjoyed or what we can improve.</p></div></div><form className="customer-feedback-form" onSubmit={submitFeedback}><div className="feedback-type-toggle"><label className={feedbackType === "recommendation" ? "is-selected" : ""}><input type="radio" name="feedback-type" value="recommendation" checked={feedbackType === "recommendation"} onChange={() => setFeedbackType("recommendation")} /><span>Recommendation</span></label><label className={feedbackType === "complaint" ? "is-selected" : ""}><input type="radio" name="feedback-type" value="complaint" checked={feedbackType === "complaint"} onChange={() => setFeedbackType("complaint")} /><span>Complaint</span></label></div><label className="feedback-message-field"><span className="visually-hidden">Your feedback</span><textarea maxLength={500} placeholder="Write your feedback" rows={3} value={feedbackText} onChange={(event) => setFeedbackText(event.target.value)} /></label><div className="customer-feedback-footer"><span>{feedbackText.length}/500</span><button className="secondary-button" type="submit">Send feedback</button></div>{feedbackMessage && <p className="feedback-status-message" role="status">{feedbackMessage}</p>}</form></section>
       </section>}
 
       {!selectedFood && activePage === "Booking" && <section className="customer-subpage booking-page">
