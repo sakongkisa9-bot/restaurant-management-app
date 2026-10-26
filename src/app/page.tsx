@@ -90,85 +90,70 @@ export default function Home() {
   const [showHours, setShowHours] = useState(false);
   const [detailPanel, setDetailPanel] = useState<"recommendations" | "complaints" | null>(null);
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
-  const [menuLoaded, setMenuLoaded] = useState(false);
   const [restaurantProfile, setRestaurantProfile] = useState<RestaurantProfileData>(defaultRestaurantProfile);
-  const [profileLoaded, setProfileLoaded] = useState(false);
   const [tableNumber, setTableNumber] = useState("");
   const [customerFeedback, setCustomerFeedback] = useState<CustomerFeedback[]>([]);
-  const [feedbackLoaded, setFeedbackLoaded] = useState(false);
+  const [isServerDataReady, setIsServerDataReady] = useState(false);
+  const [restaurantSlug, setRestaurantSlug] = useState("");
 
   useEffect(() => {
-    const loadMenu = window.setTimeout(() => {
-      try {
-        const storedItems = window.localStorage.getItem("room.menu.v1");
-        if (storedItems) {
-          const parsedItems: unknown = JSON.parse(storedItems);
-          if (Array.isArray(parsedItems)) setMenuItems(parsedItems as MenuItem[]);
-        }
-      } catch {
-        window.localStorage.removeItem("room.menu.v1");
+    const params = new URLSearchParams(window.location.search);
+    const slug = params.get("restaurant") ?? "";
+    const table = params.get("table") ?? "";
+    setRestaurantSlug(slug);
+    setTableNumber(table);
+
+    const loadRestaurantData = async () => {
+      if (!slug) {
+        setIsServerDataReady(true);
+        return;
       }
-      setMenuLoaded(true);
-    }, 0);
 
-    return () => window.clearTimeout(loadMenu);
-  }, []);
-
-  useEffect(() => {
-    if (!menuLoaded) return;
-    try {
-      window.localStorage.setItem("room.menu.v1", JSON.stringify(menuItems));
-    } catch {
-      return;
-    }
-  }, [menuItems, menuLoaded]);
-
-  useEffect(() => {
-    const loadProfile = window.setTimeout(() => {
       try {
-        const storedProfile = window.localStorage.getItem("room.restaurant-profile.v1");
-        if (storedProfile) {
-          const parsedProfile: unknown = JSON.parse(storedProfile);
-          if (parsedProfile && typeof parsedProfile === "object") {
-            setRestaurantProfile({ ...defaultRestaurantProfile, ...(parsedProfile as Partial<RestaurantProfileData>) });
+        const response = await fetch(`/api/restaurants/${encodeURIComponent(slug)}`);
+        if (!response.ok) {
+          setRestaurantProfile(defaultRestaurantProfile);
+          setMenuItems([]);
+          setCustomerFeedback([]);
+          setIsServerDataReady(true);
+          return;
+        }
+
+        const restaurant = await response.json();
+        const restaurantData = restaurant.restaurant ?? {};
+        const restaurantId = restaurantData.id;
+        setRestaurantProfile({
+          ...defaultRestaurantProfile,
+          ...restaurantData,
+          slug: restaurantData.slug ?? slug,
+        });
+
+        if (restaurantId) {
+          const [menuResponse, feedbackResponse] = await Promise.all([
+            fetch(`/api/menu?restaurantId=${encodeURIComponent(restaurantId)}`),
+            fetch(`/api/feedback?restaurantId=${encodeURIComponent(restaurantId)}`),
+          ]);
+
+          if (menuResponse.ok) {
+            const menuJson = await menuResponse.json();
+            setMenuItems(Array.isArray(menuJson.menu) ? menuJson.menu : []);
+          }
+
+          if (feedbackResponse.ok) {
+            const feedbackJson = await feedbackResponse.json();
+            setCustomerFeedback(Array.isArray(feedbackJson.feedback) ? feedbackJson.feedback : []);
           }
         }
       } catch {
-        window.localStorage.removeItem("room.restaurant-profile.v1");
+        setRestaurantProfile(defaultRestaurantProfile);
+        setMenuItems([]);
+        setCustomerFeedback([]);
+      } finally {
+        setIsServerDataReady(true);
       }
-      setProfileLoaded(true);
-    }, 0);
+    };
 
-    return () => window.clearTimeout(loadProfile);
-  }, []);
-
-  useEffect(() => {
-    if (!profileLoaded) return;
-    try {
-      window.localStorage.setItem("room.restaurant-profile.v1", JSON.stringify(restaurantProfile));
-    } catch {
-      return;
-    }
-  }, [profileLoaded, restaurantProfile]);
-
-  useEffect(() => {
-    const readTableNumber = window.setTimeout(() => {
-      setTableNumber(new URLSearchParams(window.location.search).get("table") ?? "");
-    }, 0);
-    return () => window.clearTimeout(readTableNumber);
-  }, []);
-
-  useEffect(() => {
-    const loadFeedback = window.setTimeout(() => {
-      try {
-        const storedFeedback: unknown = JSON.parse(window.localStorage.getItem("room.customer-feedback.v1") ?? "[]");
-        if (Array.isArray(storedFeedback)) setCustomerFeedback(storedFeedback as CustomerFeedback[]);
-      } catch {
-        window.localStorage.removeItem("room.customer-feedback.v1");
-      }
-      setFeedbackLoaded(true);
-    }, 0);
-    return () => window.clearTimeout(loadFeedback);
+    void loadRestaurantData();
   }, []);
 
   useEffect(() => {
@@ -201,13 +186,7 @@ export default function Home() {
   function selectWorkspace(nextWorkspace: Workspace) {
     if (window.matchMedia("(max-width: 650px)").matches) setExpanded(false);
 
-    if (nextWorkspace === "admin") {
-      try {
-        const storedFeedback: unknown = JSON.parse(window.localStorage.getItem("room.customer-feedback.v1") ?? "[]");
-        if (Array.isArray(storedFeedback)) setCustomerFeedback(storedFeedback as CustomerFeedback[]);
-      } catch {
-        setCustomerFeedback([]);
-      }
+  if (nextWorkspace === "admin") {
       setPassword("");
       setPasswordError("");
       setShowPassword(true);
@@ -248,6 +227,7 @@ export default function Home() {
   const period = chartPeriods[chartIndex];
   const recommendations = customerFeedback.filter((entry) => entry.type === "recommendation");
   const complaints = customerFeedback.filter((entry) => entry.type === "complaint");
+  const publicRestaurantLookupReady = !restaurantSlug || isServerDataReady;
 
   return (
     <div className="app-shell">
@@ -311,7 +291,9 @@ export default function Home() {
           </div>
         </header>
 
-        {workspace === "admin" ? (
+        {!restaurantSlug && workspace === "customer" && !publicRestaurantLookupReady ? (
+          <main className="page-content customer-content"><section className="panel placeholder-panel"><p className="eyebrow">RESTAURANT LOOKUP</p><h2>Loading restaurant</h2></section></main>
+        ) : workspace === "admin" ? (
           <main className="page-content admin-content">
             <div className="page-heading admin-heading">
               <div>
@@ -454,12 +436,12 @@ export default function Home() {
                 <div className="feedback-grid">
                   <section className="feedback-panel recommendations-panel">
                     <div className="feedback-symbol">R</div>
-                    <div className="feedback-copy"><p className="eyebrow">CUSTOMER VOICE</p><h2>Recommendations <span>{feedbackLoaded ? recommendations.length : 0}</span></h2><p>{recommendations.length ? recommendations.at(-1)?.message : "None received yet."}</p></div>
+                    <div className="feedback-copy"><p className="eyebrow">CUSTOMER VOICE</p><h2>Recommendations <span>{isServerDataReady ? recommendations.length : 0}</span></h2><p>{recommendations.length ? recommendations.at(-1)?.message : "None received yet."}</p></div>
                     <button className="secondary-button" type="button" disabled={!recommendations.length} onClick={() => setDetailPanel("recommendations")}>View recommendations</button>
                   </section>
                   <section className="feedback-panel complaints-panel">
                     <div className="feedback-symbol complaint-symbol">!</div>
-                    <div className="feedback-copy"><p className="eyebrow">CUSTOMER VOICE</p><h2>Complaints <span>{feedbackLoaded ? complaints.length : 0}</span></h2><p>{complaints.length ? complaints.at(-1)?.message : "None received yet."}</p></div>
+                    <div className="feedback-copy"><p className="eyebrow">CUSTOMER VOICE</p><h2>Complaints <span>{isServerDataReady ? complaints.length : 0}</span></h2><p>{complaints.length ? complaints.at(-1)?.message : "None received yet."}</p></div>
                     <button className="secondary-button" type="button" disabled={!complaints.length} onClick={() => setDetailPanel("complaints")}>View complaints</button>
                   </section>
                 </div>
@@ -472,7 +454,7 @@ export default function Home() {
                 onDeleteItem={(id) => setMenuItems((current) => current.filter((item) => item.id !== id))}
               />
             ) : adminPage === "Restaurant profile" ? (
-              profileLoaded ? (
+              isServerDataReady ? (
                 <RestaurantProfile initialProfile={restaurantProfile} onSave={setRestaurantProfile} />
               ) : (
                 <section className="panel placeholder-panel"><p className="eyebrow">RESTAURANT SETUP</p><h2>Loading profile</h2></section>
