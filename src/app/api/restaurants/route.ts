@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { asc, eq } from "drizzle-orm";
 import { NextRequest } from "next/server";
 import { hash } from "bcryptjs";
 import { drizzle } from "drizzle-orm/node-postgres";
@@ -13,7 +13,9 @@ export async function GET() {
     return Response.json({ error: "DATABASE_URL not configured" }, { status: 500 });
   }
 
-  const rows = await db.select().from(restaurants).limit(25);
+  const rows = await db.select({ name: restaurants.name, slug: restaurants.slug })
+    .from(restaurants)
+    .orderBy(asc(restaurants.name));
   return Response.json({ restaurants: rows });
 }
 

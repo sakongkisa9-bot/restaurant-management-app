@@ -6,6 +6,7 @@ import { CustomerExperience } from "./customer-experience";
 import { MenuManagement, type MenuItem } from "./menu-management";
 import { defaultRestaurantProfile, RestaurantProfile, type RestaurantProfileData } from "./restaurant-profile";
 import { StaffTracker } from "./staff-tracker";
+import { buildCustomerUrl } from "../lib/tenant";
 
 type Workspace = "customer" | "admin" | "waiter" | "cook" | "cashier" | "developer";
 type AdminPage = "Overview" | "Staff tracker" | "M-Pesa log" | "Restaurant profile" | "Menu";
@@ -13,6 +14,16 @@ type DayName = "Monday" | "Tuesday" | "Wednesday" | "Thursday" | "Friday" | "Sat
 type BusinessDay = { enabled: boolean; open: string; close: string };
 type Schedule = Record<DayName, BusinessDay>;
 type CustomerFeedback = { id: string; type: "recommendation" | "complaint"; message: string; orderNumber: string | null; createdAt: string };
+type RestaurantOption = Pick<RestaurantProfileData, "name" | "slug">;
+
+function isRestaurantOption(value: unknown): value is RestaurantOption {
+  return typeof value === "object"
+    && value !== null
+    && "name" in value
+    && typeof value.name === "string"
+    && "slug" in value
+    && typeof value.slug === "string";
+}
 
 const days: DayName[] = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 const adminPages: AdminPage[] = ["Overview", "Menu", "Restaurant profile", "Staff tracker", "M-Pesa log"];
@@ -95,6 +106,12 @@ export default function Home() {
   const [customerFeedback, setCustomerFeedback] = useState<CustomerFeedback[]>([]);
   const [isServerDataReady, setIsServerDataReady] = useState(false);
   const [restaurantSlug, setRestaurantSlug] = useState("");
+  const [restaurants, setRestaurants] = useState<RestaurantOption[]>([]);
+  const [restaurantLookupLoading, setRestaurantLookupLoading] = useState(true);
+  const [restaurantLookupError, setRestaurantLookupError] = useState("");
+  const [restaurantLookupAttempt, setRestaurantLookupAttempt] = useState(0);
+  const [restaurantName, setRestaurantName] = useState("");
+  const [selectedRestaurantSlug, setSelectedRestaurantSlug] = useState("");
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -106,6 +123,23 @@ export default function Home() {
     const loadRestaurantData = async () => {
       if (!slug) {
         setIsServerDataReady(true);
+        setRestaurantLookupLoading(true);
+        setRestaurantLookupError("");
+        try {
+          const response = await fetch("/api/restaurants");
+          if (!response.ok) throw new Error("Could not load restaurants.");
+
+          const payload: unknown = await response.json();
+          if (typeof payload !== "object" || payload === null || !("restaurants" in payload) || !Array.isArray(payload.restaurants)) {
+            throw new Error("The restaurant list response was invalid.");
+          }
+
+          setRestaurants(payload.restaurants.filter(isRestaurantOption));
+        } catch {
+          setRestaurantLookupError("We couldn’t load the restaurant list. Please try again.");
+        } finally {
+          setRestaurantLookupLoading(false);
+        }
         return;
       }
 
@@ -154,7 +188,7 @@ export default function Home() {
     };
 
     void loadRestaurantData();
-  }, []);
+  }, [restaurantLookupAttempt]);
 
   useEffect(() => {
     const updateScheduleStatus = () => setScheduledOpen(isOpenAt(new Date(), schedule));
@@ -227,7 +261,17 @@ export default function Home() {
   const period = chartPeriods[chartIndex];
   const recommendations = customerFeedback.filter((entry) => entry.type === "recommendation");
   const complaints = customerFeedback.filter((entry) => entry.type === "complaint");
-  const publicRestaurantLookupReady = !restaurantSlug || isServerDataReady;
+  const normalizedRestaurantName = restaurantName.trim().toLowerCase();
+  const exactRestaurantMatches = restaurants.filter((restaurant) => restaurant.name.trim().toLowerCase() === normalizedRestaurantName);
+  const selectedRestaurant = restaurants.find((restaurant) => restaurant.slug === selectedRestaurantSlug)
+    ?? (exactRestaurantMatches.length === 1 ? exactRestaurantMatches[0] : undefined);
+  const matchingRestaurants = restaurants.filter((restaurant) => restaurant.name.toLowerCase().includes(normalizedRestaurantName));
+
+  function openSelectedRestaurant(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedRestaurant) return;
+    window.location.assign(buildCustomerUrl(window.location.origin, selectedRestaurant.slug, tableNumber));
+  }
 
   return (
     <div className="app-shell">
@@ -291,8 +335,61 @@ export default function Home() {
           </div>
         </header>
 
-        {!restaurantSlug && workspace === "customer" && !publicRestaurantLookupReady ? (
-          <main className="page-content customer-content"><section className="panel placeholder-panel"><p className="eyebrow">RESTAURANT LOOKUP</p><h2>Loading restaurant</h2></section></main>
+        {!restaurantSlug && workspace === "customer" ? (
+          <main className="page-content customer-content">
+            <section className="panel restaurant-lookup-panel">
+              <p className="eyebrow">RESTAURANT LOOKUP</p>
+              <h1>Which restaurant are you visiting?</h1>
+              <p className="restaurant-lookup-copy">Enter the restaurant name to open its menu. Scanning a restaurant QR code takes you directly there.</p>
+              {restaurantLookupLoading ? (
+                <p className="restaurant-lookup-status" role="status">Loading restaurants…</p>
+              ) : restaurantLookupError ? (
+                <div className="restaurant-lookup-error">
+                  <p role="alert">{restaurantLookupError}</p>
+                  <button className="secondary-button" type="button" onClick={() => setRestaurantLookupAttempt((attempt) => attempt + 1)}>Try again</button>
+                </div>
+              ) : restaurants.length === 0 ? (
+                <p className="restaurant-lookup-status" role="status">No restaurants are available yet.</p>
+              ) : (
+                <form className="restaurant-lookup-form" onSubmit={openSelectedRestaurant}>
+                  <label className="profile-field restaurant-lookup-field" htmlFor="restaurant-name">
+                    <span>Restaurant name</span>
+                    <input
+                      id="restaurant-name"
+                      autoComplete="off"
+                      type="search"
+                      placeholder="Start typing a restaurant name"
+                      value={restaurantName}
+                      onChange={(event) => {
+                        setRestaurantName(event.target.value);
+                        setSelectedRestaurantSlug("");
+                      }}
+                    />
+                  </label>
+                  <div className="restaurant-lookup-options" role="group" aria-label="Available restaurants">
+                    {matchingRestaurants.length > 0 ? matchingRestaurants.map((restaurant) => (
+                      <button
+                        className={`restaurant-lookup-option${selectedRestaurantSlug === restaurant.slug ? " is-selected" : ""}`}
+                        key={restaurant.slug}
+                        type="button"
+                        aria-pressed={selectedRestaurantSlug === restaurant.slug}
+                        onClick={() => {
+                          setRestaurantName(restaurant.name);
+                          setSelectedRestaurantSlug(restaurant.slug);
+                        }}
+                      >
+                        <span>{restaurant.name}</span>
+                        <span aria-hidden="true">{selectedRestaurantSlug === restaurant.slug ? "✓" : "→"}</span>
+                      </button>
+                    )) : (
+                      <p className="restaurant-lookup-status">No restaurant found by that name.</p>
+                    )}
+                  </div>
+                  <button className="primary-button restaurant-lookup-submit" type="submit" disabled={!selectedRestaurant}>Open restaurant <span aria-hidden="true">→</span></button>
+                </form>
+              )}
+            </section>
+          </main>
         ) : workspace === "admin" ? (
           <main className="page-content admin-content">
             <div className="page-heading admin-heading">

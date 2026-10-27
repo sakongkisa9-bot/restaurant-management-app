@@ -980,6 +980,91 @@ p {
   padding: 28px;
 }
 
+.restaurant-lookup-panel {
+  margin: 32px auto 0;
+  max-width: 560px;
+  padding: 30px;
+}
+
+.restaurant-lookup-panel h1 {
+  color: var(--forest-deep);
+  font-size: 25px;
+  line-height: 1.2;
+  margin: 0;
+}
+
+.restaurant-lookup-copy {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.7;
+  margin: 10px 0 22px;
+  max-width: 440px;
+}
+
+.restaurant-lookup-status,
+.restaurant-lookup-error p {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 0;
+}
+
+.restaurant-lookup-error {
+  align-items: flex-start;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.restaurant-lookup-form {
+  display: grid;
+  gap: 15px;
+}
+
+.restaurant-lookup-field {
+  gap: 7px;
+}
+
+.restaurant-lookup-field input {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--foreground);
+  min-height: 42px;
+  padding: 0 12px;
+  width: 100%;
+}
+
+.restaurant-lookup-options {
+  display: grid;
+  gap: 7px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.restaurant-lookup-option {
+  align-items: center;
+  background: #f8faf6;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  min-height: 42px;
+  padding: 0 12px;
+  text-align: left;
+}
+
+.restaurant-lookup-option:hover,
+.restaurant-lookup-option.is-selected {
+  background: var(--soft-green);
+  border-color: #9eb697;
+}
+
+.restaurant-lookup-submit {
+  justify-content: center;
+  width: 100%;
+}
+
 .placeholder-panel > p:not(.eyebrow) {
   color: var(--muted);
   font-size: 12px;
