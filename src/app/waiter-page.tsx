@@ -93,7 +93,16 @@ function responseError(payload: unknown, fallback: string) {
 
 async function fetchDashboard() {
   const response = await fetch("/api/waiter", { cache: "no-store" });
-  const payload: unknown = await response.json();
+  const body = await response.text();
+  let payload: unknown;
+  try {
+    payload = body.trim() ? JSON.parse(body) : null;
+  } catch {
+    throw new Error(`Waiter service returned an invalid response (HTTP ${response.status}). Please try again or contact the administrator.`);
+  }
+  if (!body.trim() && !response.ok) {
+    throw new Error(`Waiter service could not load the dashboard (HTTP ${response.status}).`);
+  }
   if (!response.ok) throw new Error(responseError(payload, "Could not load waiter workspace."));
   if (!isDashboardData(payload)) throw new Error("The waiter workspace response was invalid.");
   return payload;

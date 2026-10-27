@@ -4,6 +4,18 @@ import { db } from "@/lib/db";
 import { menuItems, orderLines, orders, restaurants, staffMembers } from "@/lib/schema";
 import { getAuthenticatedSession } from "@/lib/session-access";
 
+function isMissingWaiterWorkflowMigration(error: unknown) {
+  if (typeof error !== "object" || error === null || !("code" in error) || error.code !== "42703") return false;
+  const message = "message" in error && typeof error.message === "string" ? error.message : "";
+  return [
+    "bill_request_resolved",
+    "waiter_call_resolved",
+    "waiter_call_reason",
+    "waiter_call_details",
+    "assigned_waiter_id",
+  ].some((column) => message.includes(column));
+}
+
 async function getWaiterSession() {
   const session = await getAuthenticatedSession();
   return session?.role === "waiter"
@@ -18,30 +30,44 @@ export async function GET() {
   const session = await getWaiterSession();
   if (!session) return Response.json({ error: "Waiter sign-in required" }, { status: 401 });
 
-  const [member, restaurant, food, activeOrders] = await Promise.all([
-    db.select({
-      id: staffMembers.id,
-      name: staffMembers.name,
-      phone: staffMembers.phone,
-      email: staffMembers.email,
-      passportPhoto: staffMembers.passportPhoto,
-    }).from(staffMembers).where(and(
-      eq(staffMembers.id, session.staffId),
-      eq(staffMembers.restaurantId, session.restaurantId),
-      eq(staffMembers.role, "Waiter"),
-    )).limit(1),
-    db.select({ id: restaurants.id, name: restaurants.name, tableCount: restaurants.tableCount })
-      .from(restaurants).where(eq(restaurants.id, session.restaurantId)).limit(1),
-    db.select({
-      id: menuItems.id,
-      name: menuItems.name,
-      category: menuItems.category,
-      price: menuItems.price,
-      image: menuItems.image,
-    }).from(menuItems).where(and(eq(menuItems.restaurantId, session.restaurantId), eq(menuItems.available, true))).limit(200),
-    db.select().from(orders).where(and(eq(orders.restaurantId, session.restaurantId), ne(orders.status, "completed")))
-      .orderBy(desc(orders.createdAt)).limit(200),
-  ]);
+  let member;
+  let restaurant;
+  let food;
+  let activeOrders;
+  try {
+    [member, restaurant, food, activeOrders] = await Promise.all([
+      db.select({
+        id: staffMembers.id,
+        name: staffMembers.name,
+        phone: staffMembers.phone,
+        email: staffMembers.email,
+        passportPhoto: staffMembers.passportPhoto,
+      }).from(staffMembers).where(and(
+        eq(staffMembers.id, session.staffId),
+        eq(staffMembers.restaurantId, session.restaurantId),
+        eq(staffMembers.role, "Waiter"),
+      )).limit(1),
+      db.select({ id: restaurants.id, name: restaurants.name, tableCount: restaurants.tableCount })
+        .from(restaurants).where(eq(restaurants.id, session.restaurantId)).limit(1),
+      db.select({
+        id: menuItems.id,
+        name: menuItems.name,
+        category: menuItems.category,
+        price: menuItems.price,
+        image: menuItems.image,
+      }).from(menuItems).where(and(eq(menuItems.restaurantId, session.restaurantId), eq(menuItems.available, true))).limit(200),
+      db.select().from(orders).where(and(eq(orders.restaurantId, session.restaurantId), ne(orders.status, "completed")))
+        .orderBy(desc(orders.createdAt)).limit(200),
+    ]);
+  } catch (error) {
+    if (isMissingWaiterWorkflowMigration(error)) {
+      return Response.json({
+        error: "Waiter service database setup is incomplete. Apply src/lib/migrations/0002_waiter_workflow.sql to the configured PostgreSQL database, then refresh this page.",
+        code: "WAITER_MIGRATION_REQUIRED",
+      }, { status: 503 });
+    }
+    throw error;
+  }
   if (!member[0] || !restaurant[0]) return Response.json({ error: "Waiter account or restaurant not found" }, { status: 404 });
 
   const orderIds = activeOrders.map((order) => order.id);
