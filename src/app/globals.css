@@ -2095,58 +2095,72 @@ p {
     scroll-behavior: auto !important;
     transition-duration: 0.01ms !important;
   }
+}
 
-  .waiter-content {
-    max-width: 1280px;
-  }
+.waiter-content {
+  max-width: 1280px;
+}
 
-  .waiter-page-heading {
-    align-items: center;
-    display: flex;
-    justify-content: space-between;
-    margin-bottom: 22px;
-  }
+.waiter-page-heading {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 22px;
+}
 
-  .waiter-page-heading h1 {
-    color: var(--forest-deep);
-    font-size: 30px;
-    font-weight: 650;
-    letter-spacing: -0.035em;
-    margin: 0;
-  }
+.waiter-page-heading h1 {
+  color: var(--forest-deep);
+  font-size: 30px;
+  font-weight: 650;
+  letter-spacing: -0.035em;
+  margin: 0;
+}
 
-  .waiter-user-actions {
-    align-items: center;
-    display: flex;
-    gap: 12px;
-  }
+.waiter-page-heading .page-subtitle {
+  font-size: 13px;
+  margin-top: 8px;
+}
 
-  .waiter-profile-trigger {
-    align-items: center;
-    background: #e7eee4;
-    border: 2px solid #fff;
-    border-radius: 50%;
-    box-shadow: 0 0 0 1px #d5dfd3;
-    cursor: pointer;
-    display: flex;
-    height: 46px;
-    justify-content: center;
-    overflow: hidden;
-    padding: 0;
-    width: 46px;
-  }
+.waiter-topbar-meta .topbar-date {
+  margin-right: 58px;
+}
 
-  .waiter-profile-trigger img {
-    height: 100%;
-    object-fit: cover;
-    width: 100%;
-  }
+.waiter-user-actions {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  position: fixed;
+  right: 28px;
+  top: 9px;
+  z-index: 35;
+}
 
-  .waiter-profile-trigger > span {
-    color: var(--forest);
-    font-size: 12px;
-    font-weight: 750;
-  }
+.waiter-profile-trigger {
+  align-items: center;
+  background: #e7eee4;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px #d5dfd3;
+  cursor: pointer;
+  display: flex;
+  height: 42px;
+  justify-content: center;
+  overflow: hidden;
+  padding: 0;
+  width: 42px;
+}
+
+.waiter-profile-trigger img {
+  height: 100%;
+  object-fit: cover;
+  width: 100%;
+}
+
+.waiter-profile-trigger > span {
+  color: var(--forest);
+  font-size: 12px;
+  font-weight: 750;
+}
 
   .waiter-signout {
     color: #647269;
@@ -2173,7 +2187,7 @@ p {
 
   .waiter-section-heading h2 {
     color: inherit;
-    font-size: 17px;
+    font-size: 20px;
     font-weight: 650;
     margin: 0;
   }
@@ -2187,7 +2201,7 @@ p {
     border: 1px solid rgba(255, 255, 255, 0.16);
     border-radius: 20px;
     color: #dce9dd;
-    font-size: 9px;
+    font-size: 11px;
     font-weight: 700;
     padding: 7px 10px;
   }
@@ -2251,20 +2265,20 @@ p {
 
   .waiter-notification-copy strong {
     display: block;
-    font-size: 11px;
+    font-size: 14px;
   }
 
   .waiter-notification-copy p {
     color: #6f7c73;
-    font-size: 9px;
-    line-height: 1.5;
-    margin: 4px 0 2px;
+    font-size: 12px;
+    line-height: 1.55;
+    margin: 5px 0 3px;
     overflow-wrap: anywhere;
   }
 
   .waiter-notification-copy small {
     color: #98a199;
-    font-size: 8px;
+    font-size: 10px;
   }
 
   .waiter-notification-action {
@@ -2298,12 +2312,12 @@ p {
   }
 
   .waiter-notification-empty strong {
-    font-size: 11px;
+    font-size: 14px;
   }
 
   .waiter-notification-empty p {
     color: #b7c9bd;
-    font-size: 9px;
+    font-size: 12px;
     margin: 5px 0 0;
   }
 
@@ -2370,13 +2384,13 @@ p {
   .waiter-table-card strong,
   .waiter-food-row strong {
     color: #3a4b41;
-    font-size: 9px;
+    font-size: 12px;
   }
 
   .waiter-table-card small,
   .waiter-food-row small {
     color: #8a958d;
-    font-size: 8px;
+    font-size: 10px;
   }
 
   .waiter-table-card .status-dot {
@@ -2407,7 +2421,7 @@ p {
 
   .waiter-food-row > span {
     color: #59695e;
-    font-size: 9px;
+    font-size: 11px;
     font-weight: 650;
     margin-left: auto;
     white-space: nowrap;
@@ -2418,8 +2432,8 @@ p {
     border: 1px dashed #dfe5dc;
     border-radius: 7px;
     color: #8b958d;
-    font-size: 9px;
-    padding: 18px 12px;
+    font-size: 12px;
+    padding: 22px 14px;
     text-align: center;
   }
 
@@ -2435,7 +2449,7 @@ p {
 
   .waiter-loading > p:not(.eyebrow) {
     color: var(--muted);
-    font-size: 11px;
+    font-size: 13px;
   }
 
   .waiter-error,
@@ -2443,7 +2457,7 @@ p {
     background: #fff2ec;
     border-left: 3px solid var(--clay);
     color: #98513d;
-    font-size: 10px;
+    font-size: 12px;
     margin: 0 0 12px;
     padding: 10px 12px;
   }
@@ -2605,54 +2619,61 @@ p {
     padding: 10px 12px;
   }
 
-  @media (max-width: 800px) {
-    .waiter-lower-grid {
-      grid-template-columns: 1fr;
-    }
+@media (max-width: 800px) {
+  .waiter-lower-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 650px) {
+  .waiter-content {
+    padding-left: 16px;
+    padding-right: 16px;
   }
 
-  @media (max-width: 650px) {
-    .waiter-content {
-      padding-left: 16px;
-      padding-right: 16px;
-    }
+  .waiter-page-heading {
+    align-items: flex-start;
+  }
 
-    .waiter-page-heading {
-      align-items: flex-start;
-    }
+  .waiter-page-heading h1 {
+    font-size: 24px;
+  }
 
-    .waiter-page-heading h1 {
-      font-size: 24px;
-    }
+  .waiter-user-actions {
+    right: 12px;
+  }
 
-    .waiter-notification-frame {
-      padding: 15px;
-    }
+  .waiter-topbar-meta .topbar-date {
+    margin-right: 54px;
+  }
 
-    .waiter-notification-card {
-      align-items: start;
-      gap: 9px;
-      grid-template-columns: 30px minmax(0, 1fr);
-    }
+  .waiter-notification-frame {
+    padding: 15px;
+  }
 
-    .waiter-notification-action {
-      grid-column: 2;
-      justify-self: start;
-    }
+  .waiter-notification-card {
+    align-items: start;
+    gap: 9px;
+    grid-template-columns: 30px minmax(0, 1fr);
+  }
 
-    .waiter-notification-mark {
-      height: 30px;
-      width: 30px;
-    }
+  .waiter-notification-action {
+    grid-column: 2;
+    justify-self: start;
+  }
 
-    .waiter-table-grid {
-      grid-template-columns: 1fr;
-    }
+  .waiter-notification-mark {
+    height: 30px;
+    width: 30px;
+  }
 
-    .waiter-signout {
-      font-size: 9px;
-      padding: 0 4px;
-    }
+  .waiter-table-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .waiter-signout {
+    font-size: 9px;
+    padding: 0 4px;
   }
 }
 

@@ -650,7 +650,7 @@ export default function Home() {
             <span className="context-dot" />
             <span>{workspaceLabel} workspace</span>
           </div>
-          <div className="topbar-meta">
+          <div className={`topbar-meta${workspace === "waiter" ? " waiter-topbar-meta" : ""}`}>
             <span className="topbar-date">Live service</span>
             {workspace !== "waiter" && (restaurantProfile.logo ? <Image src={restaurantProfile.logo} alt="" className="user-avatar profile-avatar-image" width={32} height={32} unoptimized /> : <span className="user-avatar" aria-label="Restaurant profile">R</span>)}
           </div>
