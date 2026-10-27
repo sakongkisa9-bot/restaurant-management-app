@@ -15,6 +15,12 @@ export const restaurants = pgTable("restaurants", {
   paymentMethod: text("payment_method").default("Till number"),
   paymentNumber: text("payment_number"),
   tableCount: integer("table_count").default(12),
+  installationFee: integer("installation_fee").notNull().default(0),
+  monthlyFee: integer("monthly_fee").notNull().default(0),
+  installationPaid: boolean("installation_paid").notNull().default(false),
+  monthlyPaid: boolean("monthly_paid").notNull().default(false),
+  autoSuspendIfUnpaid: boolean("auto_suspend_if_unpaid").notNull().default(false),
+  adminPasswordHash: text("admin_password_hash"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });

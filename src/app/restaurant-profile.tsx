@@ -6,6 +6,7 @@ import { useEffect, useState, type ChangeEvent, type FormEvent } from "react";
 import { slugify } from "../lib/tenant";
 
 export type RestaurantProfileData = {
+  id?: string;
   slug: string;
   name: string;
   logo: string;
@@ -23,7 +24,7 @@ export type RestaurantProfileData = {
 
 type RestaurantProfileProps = {
   initialProfile: RestaurantProfileData;
-  onSave: (profile: RestaurantProfileData) => void;
+  onSave: (profile: RestaurantProfileData) => void | Promise<void>;
 };
 
 const uploadLimit = 350 * 1024;
@@ -80,6 +81,11 @@ export function RestaurantProfile({ initialProfile, onSave }: RestaurantProfileP
   const [qrOpen, setQrOpen] = useState(false);
   const [qrOrigin, setQrOrigin] = useState("");
   const [qrSelection, setQrSelection] = useState("all");
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [passwordError, setPasswordError] = useState("");
+  const [passwordSaved, setPasswordSaved] = useState(false);
+  const [passwordSaving, setPasswordSaving] = useState(false);
   const restaurantSlug = profile.slug || slugify(profile.name);
 
   useEffect(() => {
@@ -141,7 +147,7 @@ export function RestaurantProfile({ initialProfile, onSave }: RestaurantProfileP
     }
   }
 
-  function saveProfile(event: FormEvent<HTMLFormElement>) {
+  async function saveProfile(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!profile.name.trim()) {
       setError("Enter the restaurant name before saving.");
@@ -161,11 +167,46 @@ export function RestaurantProfile({ initialProfile, onSave }: RestaurantProfileP
     }
 
     const nextProfile = { ...profile, name: profile.name.trim(), slug: profile.slug || slugify(profile.name.trim()) };
-    onSave(nextProfile);
-    setProfile(nextProfile);
-    setSavedProfile(nextProfile);
-    setSaved(true);
-    setError("");
+    try {
+      await onSave(nextProfile);
+      setProfile(nextProfile);
+      setSavedProfile(nextProfile);
+      setSaved(true);
+      setError("");
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "We couldn’t save the restaurant profile.");
+    }
+  }
+
+  async function changeAdminPassword() {
+    setPasswordError("");
+    setPasswordSaved(false);
+    if (!currentPassword || newPassword.length < 8) {
+      setPasswordError("Enter your current password and a new password of at least 8 characters.");
+      return;
+    }
+    setPasswordSaving(true);
+    try {
+      const response = await fetch("/api/admin/password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ currentPassword, newPassword }),
+      });
+      const payload: unknown = await response.json();
+      if (!response.ok) {
+        const message = typeof payload === "object" && payload !== null && "error" in payload && typeof payload.error === "string"
+          ? payload.error
+          : "We couldn’t change the admin password.";
+        throw new Error(message);
+      }
+      setCurrentPassword("");
+      setNewPassword("");
+      setPasswordSaved(true);
+    } catch (changeError) {
+      setPasswordError(changeError instanceof Error ? changeError.message : "We couldn’t change the admin password.");
+    } finally {
+      setPasswordSaving(false);
+    }
   }
 
   function discardChanges() {
@@ -235,8 +276,14 @@ export function RestaurantProfile({ initialProfile, onSave }: RestaurantProfileP
         </section>
 
         <section className="profile-section account-section">
-          <div className="profile-section-heading"><div><p className="eyebrow">ACCOUNT &amp; PLAN</p><h2>Password &amp; subscription</h2><p>These account actions need server-side authentication and billing setup.</p></div><span className="section-index">07</span></div>
-          <div className="account-actions-grid"><div className="account-action-card"><div><strong>Admin password</strong><span>Not connected</span><p>Password changes will be enabled after secure authentication is configured.</p></div><button className="secondary-button" type="button" disabled>Change password</button></div><div className="account-action-card"><div><strong>Restaurant plan</strong><span>Billing not connected</span><p>Subscription and payment options will appear here when billing is set up.</p></div><button className="secondary-button" type="button" disabled>Manage plan</button></div></div>
+          <div className="profile-section-heading"><div><p className="eyebrow">ACCOUNT &amp; PLAN</p><h2>Password &amp; subscription</h2><p>Change the admin password for this restaurant account.</p></div><span className="section-index">07</span></div>
+          <div className="admin-password-form">
+            <label className="profile-field"><span>Current admin password</span><input autoComplete="current-password" type="password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} /></label>
+            <label className="profile-field"><span>New admin password</span><input autoComplete="new-password" type="password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} /><small>Use at least 8 characters.</small></label>
+            {passwordError && <p className="field-error" role="alert">{passwordError}</p>}
+            {passwordSaved && <p className="save-confirmation" role="status">Admin password changed.</p>}
+            <button className="secondary-button" type="button" disabled={passwordSaving} onClick={() => void changeAdminPassword()}>{passwordSaving ? "Changing…" : "Change admin password"}</button>
+          </div>
         </section>
 
         {error && <p className="profile-error" role="alert">{error}</p>}

@@ -1,11 +1,12 @@
 "use client";
 
 import Image from "next/image";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { CustomerExperience } from "./customer-experience";
 import { MenuManagement, type MenuItem } from "./menu-management";
 import { defaultRestaurantProfile, RestaurantProfile, type RestaurantProfileData } from "./restaurant-profile";
 import { StaffTracker } from "./staff-tracker";
+import { DeveloperDashboard } from "./developer-dashboard";
 import { buildCustomerUrl } from "../lib/tenant";
 
 type Workspace = "customer" | "admin" | "waiter" | "cook" | "cashier" | "developer";
@@ -98,6 +99,8 @@ export default function Home() {
   const [showPassword, setShowPassword] = useState(false);
   const [password, setPassword] = useState("");
   const [passwordError, setPasswordError] = useState("");
+  const [passwordRole, setPasswordRole] = useState<"admin" | "developer">("admin");
+  const [passwordSubmitting, setPasswordSubmitting] = useState(false);
   const [showHours, setShowHours] = useState(false);
   const [detailPanel, setDetailPanel] = useState<"recommendations" | "complaints" | null>(null);
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
@@ -112,15 +115,79 @@ export default function Home() {
   const [restaurantLookupAttempt, setRestaurantLookupAttempt] = useState(0);
   const [restaurantName, setRestaurantName] = useState("");
   const [selectedRestaurantSlug, setSelectedRestaurantSlug] = useState("");
+  const [restaurantSuspended, setRestaurantSuspended] = useState(false);
+
+  const loadRestaurantData = useCallback(async (slug: string) => {
+    setIsServerDataReady(false);
+    try {
+      const response = await fetch(`/api/restaurants/${encodeURIComponent(slug)}`);
+      if (!response.ok) {
+        setRestaurantProfile(defaultRestaurantProfile);
+        setMenuItems([]);
+        setCustomerFeedback([]);
+        setRestaurantSuspended(response.status === 403);
+        return;
+      }
+
+      setRestaurantSuspended(false);
+      const result = await response.json();
+      const restaurantData = result.restaurant ?? {};
+      const restaurantId = restaurantData.id;
+      setRestaurantProfile({
+        ...defaultRestaurantProfile,
+        ...restaurantData,
+        slug: restaurantData.slug ?? slug,
+        logo: restaurantData.logo ?? "",
+        phone: restaurantData.phone ?? "",
+        email: restaurantData.email ?? "",
+        address: restaurantData.address ?? "",
+        mapsUrl: restaurantData.mapsUrl ?? "",
+        welcomeMessage: restaurantData.welcomeMessage ?? "",
+        famousDish: restaurantData.famousDish ?? "",
+        photos: Array.isArray(restaurantData.photos) ? restaurantData.photos : [],
+        paymentMethod: restaurantData.paymentMethod ?? defaultRestaurantProfile.paymentMethod,
+        paymentNumber: restaurantData.paymentNumber ?? "",
+        tableCount: restaurantData.tableCount ?? defaultRestaurantProfile.tableCount,
+      });
+
+      if (restaurantId) {
+        const [menuResponse, feedbackResponse] = await Promise.all([
+          fetch(`/api/menu?restaurantId=${encodeURIComponent(restaurantId)}`),
+          fetch(`/api/feedback?restaurantId=${encodeURIComponent(restaurantId)}`),
+        ]);
+        if (menuResponse.ok) {
+          const menuJson = await menuResponse.json();
+          setMenuItems(Array.isArray(menuJson.menu) ? menuJson.menu : []);
+        } else {
+          setMenuItems([]);
+        }
+        if (feedbackResponse.ok) {
+          const feedbackJson = await feedbackResponse.json();
+          setCustomerFeedback(Array.isArray(feedbackJson.feedback) ? feedbackJson.feedback : []);
+        } else {
+          setCustomerFeedback([]);
+        }
+      } else {
+        setMenuItems([]);
+        setCustomerFeedback([]);
+      }
+    } catch {
+      setRestaurantProfile(defaultRestaurantProfile);
+      setMenuItems([]);
+      setCustomerFeedback([]);
+    } finally {
+      setIsServerDataReady(true);
+    }
+  }, []);
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const slug = params.get("restaurant") ?? "";
-    const table = params.get("table") ?? "";
-    setRestaurantSlug(slug);
-    setTableNumber(table);
+    const initialization = window.setTimeout(async () => {
+      const params = new URLSearchParams(window.location.search);
+      const slug = params.get("restaurant") ?? "";
+      const table = params.get("table") ?? "";
+      setRestaurantSlug(slug);
+      setTableNumber(table);
 
-    const loadRestaurantData = async () => {
       if (!slug) {
         setIsServerDataReady(true);
         setRestaurantLookupLoading(true);
@@ -143,52 +210,10 @@ export default function Home() {
         return;
       }
 
-      try {
-        const response = await fetch(`/api/restaurants/${encodeURIComponent(slug)}`);
-        if (!response.ok) {
-          setRestaurantProfile(defaultRestaurantProfile);
-          setMenuItems([]);
-          setCustomerFeedback([]);
-          setIsServerDataReady(true);
-          return;
-        }
-
-        const restaurant = await response.json();
-        const restaurantData = restaurant.restaurant ?? {};
-        const restaurantId = restaurantData.id;
-        setRestaurantProfile({
-          ...defaultRestaurantProfile,
-          ...restaurantData,
-          slug: restaurantData.slug ?? slug,
-        });
-
-        if (restaurantId) {
-          const [menuResponse, feedbackResponse] = await Promise.all([
-            fetch(`/api/menu?restaurantId=${encodeURIComponent(restaurantId)}`),
-            fetch(`/api/feedback?restaurantId=${encodeURIComponent(restaurantId)}`),
-          ]);
-
-          if (menuResponse.ok) {
-            const menuJson = await menuResponse.json();
-            setMenuItems(Array.isArray(menuJson.menu) ? menuJson.menu : []);
-          }
-
-          if (feedbackResponse.ok) {
-            const feedbackJson = await feedbackResponse.json();
-            setCustomerFeedback(Array.isArray(feedbackJson.feedback) ? feedbackJson.feedback : []);
-          }
-        }
-      } catch {
-        setRestaurantProfile(defaultRestaurantProfile);
-        setMenuItems([]);
-        setCustomerFeedback([]);
-      } finally {
-        setIsServerDataReady(true);
-      }
-    };
-
-    void loadRestaurantData();
-  }, [restaurantLookupAttempt]);
+      void loadRestaurantData(slug);
+    }, 0);
+    return () => window.clearTimeout(initialization);
+  }, [loadRestaurantData, restaurantLookupAttempt]);
 
   useEffect(() => {
     const updateScheduleStatus = () => setScheduledOpen(isOpenAt(new Date(), schedule));
@@ -220,7 +245,8 @@ export default function Home() {
   function selectWorkspace(nextWorkspace: Workspace) {
     if (window.matchMedia("(max-width: 650px)").matches) setExpanded(false);
 
-  if (nextWorkspace === "admin") {
+    if (nextWorkspace === "admin" || nextWorkspace === "developer") {
+      setPasswordRole(nextWorkspace);
       setPassword("");
       setPasswordError("");
       setShowPassword(true);
@@ -230,15 +256,59 @@ export default function Home() {
     setAdminPage("Overview");
   }
 
-  function enterAdmin(event: React.FormEvent<HTMLFormElement>) {
+  async function enterRestrictedWorkspace(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!password.trim()) {
-      setPasswordError("Enter a password to open the preview.");
+    if (!password) {
+      setPasswordError(`Enter the ${passwordRole} password.`);
       return;
     }
-    setShowPassword(false);
-    setWorkspace("admin");
-    setAdminPage("Overview");
+    if (passwordRole === "admin" && !restaurantSlug) {
+      setPasswordError("Open the restaurant-specific link before signing in as its admin.");
+      return;
+    }
+
+    setPasswordSubmitting(true);
+    setPasswordError("");
+    try {
+      const response = await fetch(passwordRole === "developer" ? "/api/developer/login" : "/api/admin/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(passwordRole === "developer" ? { password } : { password, slug: restaurantSlug }),
+      });
+      const payload: unknown = await response.json();
+      if (!response.ok) {
+        const message = typeof payload === "object" && payload !== null && "error" in payload && typeof payload.error === "string"
+          ? payload.error
+          : `Could not sign in to the ${passwordRole} workspace.`;
+        throw new Error(message);
+      }
+      if (passwordRole === "admin") await loadRestaurantData(restaurantSlug);
+      setShowPassword(false);
+      setPassword("");
+      setWorkspace(passwordRole);
+      setAdminPage("Overview");
+    } catch (loginError) {
+      setPasswordError(loginError instanceof Error ? loginError.message : `Could not sign in to the ${passwordRole} workspace.`);
+    } finally {
+      setPasswordSubmitting(false);
+    }
+  }
+
+  async function saveRestaurantProfile(profile: RestaurantProfileData) {
+    if (!profile.id) throw new Error("This restaurant profile is not linked to a registered restaurant.");
+    const response = await fetch("/api/restaurants", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(profile),
+    });
+    const payload: unknown = await response.json();
+    if (!response.ok) {
+      const message = typeof payload === "object" && payload !== null && "error" in payload && typeof payload.error === "string"
+        ? payload.error
+        : "Could not save the restaurant profile.";
+      throw new Error(message);
+    }
+    setRestaurantProfile(profile);
   }
 
   function saveSchedule(event: React.FormEvent<HTMLFormElement>) {
@@ -552,7 +622,7 @@ export default function Home() {
               />
             ) : adminPage === "Restaurant profile" ? (
               isServerDataReady ? (
-                <RestaurantProfile initialProfile={restaurantProfile} onSave={setRestaurantProfile} />
+                <RestaurantProfile initialProfile={restaurantProfile} onSave={saveRestaurantProfile} />
               ) : (
                 <section className="panel placeholder-panel"><p className="eyebrow">RESTAURANT SETUP</p><h2>Loading profile</h2></section>
               )
@@ -566,6 +636,10 @@ export default function Home() {
               </section>
             )}
           </main>
+        ) : workspace === "developer" ? (
+          <DeveloperDashboard />
+        ) : workspace === "customer" && restaurantSuspended ? (
+          <main className="page-content customer-content"><section className="panel restaurant-suspended-panel"><p className="eyebrow">RESTAURANT UNAVAILABLE</p><h1>This restaurant is temporarily unavailable</h1><p>Customer access has been paused. Please contact the restaurant directly for assistance.</p></section></main>
         ) : workspace === "customer" ? (
           <CustomerExperience items={menuItems} profile={restaurantProfile} isOpen={restaurantIsOpen} tableNumber={tableNumber} />
         ) : (
@@ -574,7 +648,6 @@ export default function Home() {
               <p className="eyebrow">{workspaceLabel.toUpperCase()} WORKSPACE</p>
               <h1>{workspaceLabel} tools are coming next.</h1>
               <p>This area is reserved for the {workspace} workflow. We&apos;ll build it after the admin foundation.</p>
-              {workspace === "developer" && <span className="placeholder-note">Developer setup is not configured yet.</span>}
             </section>
           </main>
         )}
@@ -586,14 +659,14 @@ export default function Home() {
             <button className="dialog-close" type="button" onClick={() => setShowPassword(false)} aria-label="Close password dialog">×</button>
             <div className="dialog-mark">A</div>
             <p className="eyebrow">RESTRICTED WORKSPACE</p>
-            <h2 id="password-title">Admin sign in</h2>
-            <p className="dialog-description">Enter a password to preview the admin workspace.</p>
-            <form onSubmit={enterAdmin}>
-              <label className="field-label" htmlFor="admin-password">Admin password</label>
+            <h2 id="password-title">{passwordRole === "developer" ? "Developer sign in" : "Admin sign in"}</h2>
+            <p className="dialog-description">{passwordRole === "developer" ? "Enter the developer password to manage restaurant accounts." : "Enter this restaurant’s admin password."}</p>
+            <form onSubmit={enterRestrictedWorkspace}>
+              <label className="field-label" htmlFor="admin-password">{passwordRole === "developer" ? "Developer password" : "Admin password"}</label>
               <input id="admin-password" className="text-input" type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" autoFocus />
               {passwordError && <p className="field-error" role="alert">{passwordError}</p>}
-              <p className="prototype-note">Preview only: password verification will be connected to Developer setup later.</p>
-              <button className="primary-button dialog-submit" type="submit">Continue to admin <span aria-hidden="true">→</span></button>
+              {passwordRole === "developer" && <p className="prototype-note">Developer password is configured in the server code.</p>}
+              <button className="primary-button dialog-submit" type="submit" disabled={passwordSubmitting}>{passwordSubmitting ? "Signing in…" : `Continue to ${passwordRole}`} <span aria-hidden="true">→</span></button>
             </form>
           </section>
         </div>
