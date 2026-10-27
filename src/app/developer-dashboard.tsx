@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
+import { QRCodeSVG } from "qrcode.react";
+import { buildCustomerUrl } from "../lib/tenant";
 
 type ManagedRestaurant = {
   id: string;
@@ -11,6 +13,7 @@ type ManagedRestaurant = {
   installationPaid: boolean;
   monthlyPaid: boolean;
   autoSuspendIfUnpaid: boolean;
+  tableCount: number | null;
   createdAt: string | null;
 };
 
@@ -45,6 +48,7 @@ function isManagedRestaurant(value: unknown): value is ManagedRestaurant {
     && "installationPaid" in value && typeof value.installationPaid === "boolean"
     && "monthlyPaid" in value && typeof value.monthlyPaid === "boolean"
     && "autoSuspendIfUnpaid" in value && typeof value.autoSuspendIfUnpaid === "boolean"
+    && "tableCount" in value && (typeof value.tableCount === "number" || value.tableCount === null)
     && "createdAt" in value
     && (typeof value.createdAt === "string" || value.createdAt === null);
 }
@@ -57,6 +61,9 @@ export function DeveloperDashboard() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [qrRestaurant, setQrRestaurant] = useState<ManagedRestaurant | null>(null);
+  const [qrOrigin, setQrOrigin] = useState("");
+  const [qrSelection, setQrSelection] = useState("general");
 
   async function loadRestaurants() {
     setLoading(true);
@@ -171,6 +178,21 @@ export function DeveloperDashboard() {
     }
   }
 
+  const tableNumbers = qrRestaurant
+    ? Array.from({ length: qrRestaurant.tableCount ?? 12 }, (_, index) => index + 1)
+    : [];
+  const qrCards = !qrRestaurant ? [] : qrSelection === "all"
+    ? tableNumbers.map((table) => ({
+      label: `TABLE ${String(table).padStart(2, "0")}`,
+      url: buildCustomerUrl(qrOrigin, qrRestaurant.slug, table),
+    }))
+    : qrSelection === "general"
+      ? [{ label: "RESTAURANT MENU", url: buildCustomerUrl(qrOrigin, qrRestaurant.slug) }]
+      : [{
+        label: `TABLE ${String(Number(qrSelection)).padStart(2, "0")}`,
+        url: buildCustomerUrl(qrOrigin, qrRestaurant.slug, Number(qrSelection)),
+      }];
+
   return (
     <main className="page-content admin-content developer-content">
       <div className="page-heading">
@@ -243,6 +265,7 @@ export function DeveloperDashboard() {
                     </div>
                     {suspended && <p className="developer-suspended-note">Customer access stopped until payment is marked paid.</p>}
                     <div className="developer-restaurant-actions">
+                      <button className="secondary-button" type="button" onClick={() => { setQrOrigin(window.location.origin); setQrRestaurant(restaurant); setQrSelection("general"); }}>QR codes</button>
                       <button className="secondary-button" type="button" onClick={() => editRestaurant(restaurant)}>Edit</button>
                       <button className="secondary-button developer-delete-button" type="button" onClick={() => void deleteRestaurant(restaurant)}>Delete</button>
                     </div>
@@ -253,6 +276,21 @@ export function DeveloperDashboard() {
           )}
         </section>
       </div>
+      {qrRestaurant && (
+        <div className="modal-backdrop qr-modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && setQrRestaurant(null)}>
+          <section className="qr-dialog" role="dialog" aria-modal="true" aria-labelledby="developer-qr-title">
+            <div className="qr-dialog-heading">
+              <div><p className="eyebrow">CUSTOMER ACCESS</p><h2 id="developer-qr-title">{qrRestaurant.name} QR codes</h2><p>Scan a code to open this restaurant&apos;s customer menu.</p></div>
+              <button className="dialog-close" type="button" aria-label="Close QR codes" onClick={() => setQrRestaurant(null)}>×</button>
+            </div>
+            <div className="qr-toolbar">
+              <label className="qr-select-field"><span>Show</span><select value={qrSelection} onChange={(event) => setQrSelection(event.target.value)}><option value="general">Restaurant menu</option><option value="all">All {tableNumbers.length} tables</option>{tableNumbers.map((table) => <option value={table} key={table}>Table {table}</option>)}</select></label>
+              <button className="secondary-button" type="button" onClick={() => window.print()}>Print codes</button>
+            </div>
+            <div className="qr-grid">{qrCards.map((card) => <article className="qr-table-card" key={card.label}><QRCodeSVG value={card.url} size={112} level="M" includeMargin /><strong>{card.label}</strong><span>{card.url}</span></article>)}</div>
+          </section>
+        </div>
+      )}
     </main>
   );
 }

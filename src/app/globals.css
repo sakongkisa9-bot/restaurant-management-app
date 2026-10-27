@@ -1034,6 +1034,16 @@ p {
   width: 100%;
 }
 
+.restaurant-lookup-field select {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--foreground);
+  min-height: 42px;
+  padding: 0 12px;
+  width: 100%;
+}
+
 .restaurant-lookup-options {
   display: grid;
   gap: 7px;

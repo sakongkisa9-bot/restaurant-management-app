@@ -37,6 +37,7 @@ export async function GET() {
     installationPaid: restaurants.installationPaid,
     monthlyPaid: restaurants.monthlyPaid,
     autoSuspendIfUnpaid: restaurants.autoSuspendIfUnpaid,
+    tableCount: restaurants.tableCount,
     createdAt: restaurants.createdAt,
   }).from(restaurants).orderBy(asc(restaurants.name));
 
@@ -75,6 +76,7 @@ export async function POST(request: NextRequest) {
     installationPaid: restaurants.installationPaid,
     monthlyPaid: restaurants.monthlyPaid,
     autoSuspendIfUnpaid: restaurants.autoSuspendIfUnpaid,
+    tableCount: restaurants.tableCount,
     createdAt: restaurants.createdAt,
   });
 
@@ -122,6 +124,7 @@ export async function PUT(request: NextRequest) {
     installationPaid: restaurants.installationPaid,
     monthlyPaid: restaurants.monthlyPaid,
     autoSuspendIfUnpaid: restaurants.autoSuspendIfUnpaid,
+    tableCount: restaurants.tableCount,
     createdAt: restaurants.createdAt,
   });
   if (!updated[0]) return Response.json({ error: "Restaurant not found" }, { status: 404 });

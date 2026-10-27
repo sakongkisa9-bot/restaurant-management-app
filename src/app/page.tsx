@@ -116,6 +116,29 @@ export default function Home() {
   const [restaurantName, setRestaurantName] = useState("");
   const [selectedRestaurantSlug, setSelectedRestaurantSlug] = useState("");
   const [restaurantSuspended, setRestaurantSuspended] = useState(false);
+  const [adminRestaurantOptions, setAdminRestaurantOptions] = useState<RestaurantOption[]>([]);
+  const [selectedAdminRestaurantSlug, setSelectedAdminRestaurantSlug] = useState("");
+  const [showAdminRestaurantPicker, setShowAdminRestaurantPicker] = useState(false);
+
+  const loadRestaurantOptions = useCallback(async () => {
+    setRestaurantLookupLoading(true);
+    setRestaurantLookupError("");
+    try {
+      const response = await fetch("/api/restaurants", { cache: "no-store" });
+      if (!response.ok) throw new Error("Could not load restaurants.");
+
+      const payload: unknown = await response.json();
+      if (typeof payload !== "object" || payload === null || !("restaurants" in payload) || !Array.isArray(payload.restaurants)) {
+        throw new Error("The restaurant list response was invalid.");
+      }
+
+      setRestaurants(payload.restaurants.filter(isRestaurantOption));
+    } catch {
+      setRestaurantLookupError("We couldn’t load the restaurant list. Please try again.");
+    } finally {
+      setRestaurantLookupLoading(false);
+    }
+  }, []);
 
   const loadRestaurantData = useCallback(async (slug: string) => {
     setIsServerDataReady(false);
@@ -190,30 +213,14 @@ export default function Home() {
 
       if (!slug) {
         setIsServerDataReady(true);
-        setRestaurantLookupLoading(true);
-        setRestaurantLookupError("");
-        try {
-          const response = await fetch("/api/restaurants");
-          if (!response.ok) throw new Error("Could not load restaurants.");
-
-          const payload: unknown = await response.json();
-          if (typeof payload !== "object" || payload === null || !("restaurants" in payload) || !Array.isArray(payload.restaurants)) {
-            throw new Error("The restaurant list response was invalid.");
-          }
-
-          setRestaurants(payload.restaurants.filter(isRestaurantOption));
-        } catch {
-          setRestaurantLookupError("We couldn’t load the restaurant list. Please try again.");
-        } finally {
-          setRestaurantLookupLoading(false);
-        }
+        await loadRestaurantOptions();
         return;
       }
 
       void loadRestaurantData(slug);
     }, 0);
     return () => window.clearTimeout(initialization);
-  }, [loadRestaurantData, restaurantLookupAttempt]);
+  }, [loadRestaurantData, loadRestaurantOptions, restaurantLookupAttempt]);
 
   useEffect(() => {
     const updateScheduleStatus = () => setScheduledOpen(isOpenAt(new Date(), schedule));
@@ -245,6 +252,25 @@ export default function Home() {
   function selectWorkspace(nextWorkspace: Workspace) {
     if (window.matchMedia("(max-width: 650px)").matches) setExpanded(false);
 
+    if (nextWorkspace === "admin" && !restaurantSlug) {
+      setSelectedAdminRestaurantSlug("");
+      setPasswordError("");
+      setShowAdminRestaurantPicker(true);
+      void (async () => {
+        try {
+          const response = await fetch("/api/admin/restaurant-options", { cache: "no-store" });
+          const payload: unknown = await response.json();
+          if (!response.ok || typeof payload !== "object" || payload === null || !("restaurants" in payload) || !Array.isArray(payload.restaurants)) {
+            throw new Error("Could not load registered restaurants.");
+          }
+          setAdminRestaurantOptions(payload.restaurants.filter(isRestaurantOption));
+        } catch {
+          setPasswordError("Could not load registered restaurants. Please try again.");
+        }
+      })();
+      return;
+    }
+
     if (nextWorkspace === "admin" || nextWorkspace === "developer") {
       setPasswordRole(nextWorkspace);
       setPassword("");
@@ -252,8 +278,28 @@ export default function Home() {
       setShowPassword(true);
       return;
     }
+    if (nextWorkspace === "customer" && !restaurantSlug) void loadRestaurantOptions();
     setWorkspace(nextWorkspace);
     setAdminPage("Overview");
+  }
+
+  function continueToAdminSignIn(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const restaurant = adminRestaurantOptions.find((option) => option.slug === selectedAdminRestaurantSlug);
+    if (!restaurant) {
+      setPasswordError("Select a restaurant to continue.");
+      return;
+    }
+
+    const url = new URL(window.location.href);
+    url.searchParams.set("restaurant", restaurant.slug);
+    window.history.replaceState(null, "", url);
+    setRestaurantSlug(restaurant.slug);
+    setShowAdminRestaurantPicker(false);
+    setPasswordRole("admin");
+    setPassword("");
+    setPasswordError("");
+    setShowPassword(true);
   }
 
   async function enterRestrictedWorkspace(event: React.FormEvent<HTMLFormElement>) {
@@ -419,7 +465,10 @@ export default function Home() {
                   <button className="secondary-button" type="button" onClick={() => setRestaurantLookupAttempt((attempt) => attempt + 1)}>Try again</button>
                 </div>
               ) : restaurants.length === 0 ? (
-                <p className="restaurant-lookup-status" role="status">No restaurants are available yet.</p>
+                <div className="restaurant-lookup-error">
+                  <p className="restaurant-lookup-status" role="status">No restaurants are currently available.</p>
+                  <button className="secondary-button" type="button" onClick={() => void loadRestaurantOptions()}>Refresh list</button>
+                </div>
               ) : (
                 <form className="restaurant-lookup-form" onSubmit={openSelectedRestaurant}>
                   <label className="profile-field restaurant-lookup-field" htmlFor="restaurant-name">
@@ -652,6 +701,33 @@ export default function Home() {
           </main>
         )}
       </div>
+
+      {showAdminRestaurantPicker && (
+        <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && setShowAdminRestaurantPicker(false)}>
+          <section className="dialog-card" role="dialog" aria-modal="true" aria-labelledby="admin-restaurant-title">
+            <button className="dialog-close" type="button" onClick={() => setShowAdminRestaurantPicker(false)} aria-label="Close restaurant selection">×</button>
+            <div className="dialog-mark">A</div>
+            <p className="eyebrow">RESTAURANT ADMIN</p>
+            <h2 id="admin-restaurant-title">Choose your restaurant</h2>
+            <p className="dialog-description">Select a restaurant, then enter its admin password.</p>
+            {adminRestaurantOptions.length === 0 ? (
+              <p className="restaurant-lookup-status" role="status">No restaurants are registered yet, or the list could not be loaded. Close this window and try again.</p>
+            ) : (
+              <form className="restaurant-lookup-form" onSubmit={continueToAdminSignIn}>
+                <label className="profile-field restaurant-lookup-field" htmlFor="admin-restaurant">
+                  <span>Restaurant</span>
+                  <select id="admin-restaurant" value={selectedAdminRestaurantSlug} onChange={(event) => setSelectedAdminRestaurantSlug(event.target.value)}>
+                    <option value="">Select a restaurant</option>
+                    {adminRestaurantOptions.map((restaurant) => <option value={restaurant.slug} key={restaurant.slug}>{restaurant.name}</option>)}
+                  </select>
+                </label>
+                {passwordError && <p className="field-error" role="alert">{passwordError}</p>}
+                <button className="primary-button dialog-submit" type="submit" disabled={!selectedAdminRestaurantSlug}>Continue <span aria-hidden="true">→</span></button>
+              </form>
+            )}
+          </section>
+        </div>
+      )}
 
       {showPassword && (
         <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && setShowPassword(false)}>
