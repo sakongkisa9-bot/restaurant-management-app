@@ -89,6 +89,11 @@ export function CustomerExperience({ items, profile, isOpen, tableNumber }: Cust
   const [paymentOpen, setPaymentOpen] = useState(false);
   const [paymentCopyMessage, setPaymentCopyMessage] = useState("");
   const [orderNotice, setOrderNotice] = useState("");
+  const [orderSubmitting, setOrderSubmitting] = useState(false);
+  const [serviceRequestSubmitting, setServiceRequestSubmitting] = useState(false);
+  const [waiterRequestOpen, setWaiterRequestOpen] = useState(false);
+  const [waiterRequestReason, setWaiterRequestReason] = useState("Water");
+  const [waiterRequestDetails, setWaiterRequestDetails] = useState("");
   const [feedbackType, setFeedbackType] = useState<"recommendation" | "complaint">("recommendation");
   const [feedbackText, setFeedbackText] = useState("");
   const [feedbackMessage, setFeedbackMessage] = useState("");
@@ -174,33 +179,102 @@ export function CustomerExperience({ items, profile, isOpen, tableNumber }: Cust
     }));
   }
 
-  function confirmOrder() {
-    if (cart.length === 0 || orderActive) return;
+  async function confirmOrder() {
+    if (cart.length === 0 || orderActive || orderSubmitting) return;
+    if (!profile.id || !tableNumber || !Number.isInteger(Number(tableNumber)) || Number(tableNumber) < 1) {
+      setOrderNotice("Open this menu from a restaurant table QR code before confirming an order.");
+      return;
+    }
     const lines = cart.flatMap((entry) => {
       const item = items.find((candidate) => candidate.id === entry.itemId);
       return item ? [{ ...entry, name: item.name, price: item.price, image: dishImages(item)[0] ?? "" }] : [];
     });
     if (!lines.length) return;
 
-    setConfirmedOrder({
-      id: crypto.randomUUID(),
-      number: `RH-${Date.now().toString().slice(-6)}`,
-      lines,
-      total: lines.reduce((total, line) => total + line.price * line.quantity, 0),
-      tableNumber,
-      status: "confirmed",
-      createdAt: new Date().toISOString(),
-      billRequested: false,
-      waiterCalled: false,
-      paymentStatus: "unpaid",
-    });
-    setCart([]);
+    setOrderSubmitting(true);
     setOrderNotice("");
+    try {
+      const response = await fetch("/api/orders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          restaurantId: profile.id,
+          tableNumber: Number(tableNumber),
+          lines: lines.map(({ itemId, name, quantity, price, specification }) => ({ itemId, name, quantity, price, specification })),
+        }),
+      });
+      const payload: unknown = await response.json();
+      if (!response.ok || typeof payload !== "object" || payload === null || !("order" in payload)
+        || typeof payload.order !== "object" || payload.order === null
+        || !("id" in payload.order) || typeof payload.order.id !== "string"
+        || !("orderNumber" in payload.order) || typeof payload.order.orderNumber !== "string") {
+        const message = typeof payload === "object" && payload !== null && "error" in payload && typeof payload.error === "string"
+          ? payload.error
+          : "The order could not be sent to the restaurant.";
+        throw new Error(message);
+      }
+      setConfirmedOrder({
+        id: payload.order.id,
+        number: payload.order.orderNumber,
+        lines,
+        total: lines.reduce((total, line) => total + line.price * line.quantity, 0),
+        tableNumber,
+        status: "confirmed",
+        createdAt: new Date().toISOString(),
+        billRequested: false,
+        waiterCalled: false,
+        paymentStatus: "unpaid",
+      });
+      setCart([]);
+    } catch (submitError) {
+      setOrderNotice(submitError instanceof Error ? submitError.message : "The order could not be sent to the restaurant.");
+    } finally {
+      setOrderSubmitting(false);
+    }
   }
 
-  function requestService(request: "bill" | "waiter") {
-    setConfirmedOrder((current) => current ? { ...current, [request === "bill" ? "billRequested" : "waiterCalled"]: true } : current);
-    setOrderNotice(request === "bill" ? "Bill request recorded. Cashier notifications will connect when staff tools are set up." : "Waiter request recorded. Live waiter notifications will connect when staff tools are set up.");
+  async function requestService(request: "bill" | "waiter", reason?: string, details?: string) {
+    if (!confirmedOrder || !profile.id) return;
+    if (request === "waiter" && !reason) {
+      setWaiterRequestOpen(true);
+      setOrderNotice("");
+      return;
+    }
+    setServiceRequestSubmitting(true);
+    try {
+      const response = await fetch(`/api/orders/${encodeURIComponent(confirmedOrder.id)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          restaurantId: profile.id,
+          action: request,
+          ...(request === "waiter" ? { reason, details: details ?? "" } : {}),
+        }),
+      });
+      const payload: unknown = await response.json();
+      if (!response.ok) {
+        const message = typeof payload === "object" && payload !== null && "error" in payload && typeof payload.error === "string"
+          ? payload.error
+          : "Your request could not be sent.";
+        throw new Error(message);
+      }
+      setConfirmedOrder((current) => current ? {
+        ...current,
+        [request === "bill" ? "billRequested" : "waiterCalled"]: true,
+      } : current);
+      setOrderNotice(request === "bill" ? "Your bill request has been sent to the service team." : "Your request has been sent to the waiter.");
+      setWaiterRequestOpen(false);
+      setWaiterRequestDetails("");
+    } catch (requestError) {
+      setOrderNotice(requestError instanceof Error ? requestError.message : "Your request could not be sent.");
+    } finally {
+      setServiceRequestSubmitting(false);
+    }
+  }
+
+  function submitWaiterRequest(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    void requestService("waiter", waiterRequestReason, waiterRequestDetails.trim());
   }
 
   async function submitFeedback(event: FormEvent<HTMLFormElement>) {
@@ -336,16 +410,17 @@ export function CustomerExperience({ items, profile, isOpen, tableNumber }: Cust
 
       {!selectedFood && activePage === "My order" && <section className="customer-subpage order-page">
         <div className="customer-subpage-heading"><div><p className="eyebrow">YOUR SELECTION</p><h1>My order</h1><p>{orderActive && confirmedOrder ? `Order ${confirmedOrder.number} · placed ${new Intl.DateTimeFormat("en-KE", { hour: "numeric", minute: "2-digit" }).format(new Date(confirmedOrder.createdAt))}` : "Review your choices before confirming with the kitchen."}</p></div><span className={`order-count-pill${orderActive ? " is-tracking" : ""}`}>{orderActive ? "TRACKING" : `${cartCount} ${cartCount === 1 ? "item" : "items"}`}</span></div>
+        {orderNotice && !orderActive && <p className="order-action-notice" role="alert">{orderNotice}</p>}
         {!orderActive && cart.length === 0 ? <div className="customer-empty-order"><span className="empty-icon">0</span><h2>Your order is empty</h2><p>Browse the menu and add something you love.</p><button className="primary-button" type="button" onClick={() => setActivePage("Menu")}>Browse menu <span aria-hidden="true">→</span></button></div> : !orderActive && <div className="order-review-layout"><div className="order-lines"><div className="order-lines-heading"><div><p className="eyebrow">CART REVIEW</p><h2>Check your order</h2></div><span>{cartCount} {cartCount === 1 ? "item" : "items"}</span></div>{cart.map((entry) => { const item = items.find((candidate) => candidate.id === entry.itemId); if (!item) return null; const image = dishImages(item)[0]; return <article className="order-line" key={`${entry.itemId}-${entry.specification}`}>
             {image ? <Image src={image} alt="" width={64} height={56} unoptimized /> : <span className="order-line-placeholder">{item.name.slice(0, 1)}</span>}<div className="order-line-info"><strong>{item.name}</strong>{entry.specification && <span>{entry.specification}</span>}<span>KSh {item.price.toLocaleString("en-KE")} each</span></div><div className="quantity-control"><button type="button" onClick={() => changeQuantity(entry, -1)} aria-label={`Remove one ${item.name}`}>−</button><span>{entry.quantity}</span><button type="button" onClick={() => changeQuantity(entry, 1)} aria-label={`Add one ${item.name}`}>+</button></div><strong className="order-line-total">KSh {(item.price * entry.quantity).toLocaleString("en-KE")}</strong>
-          </article>; })}<button className="text-button continue-menu-button" type="button" onClick={() => setActivePage("Menu")}>← Continue browsing</button></div><aside className="order-summary"><p className="eyebrow">ORDER SUMMARY</p><h2>Ready to send?</h2><div><span>{cartCount} {cartCount === 1 ? "item" : "items"}</span><strong>KSh {cartTotal.toLocaleString("en-KE")}</strong></div><p>Confirming sends this order to the kitchen.</p><button className="primary-button" type="button" onClick={confirmOrder}>Confirm order <span aria-hidden="true">→</span></button></aside></div>}
+          </article>; })}<button className="text-button continue-menu-button" type="button" onClick={() => setActivePage("Menu")}>← Continue browsing</button></div><aside className="order-summary"><p className="eyebrow">ORDER SUMMARY</p><h2>Ready to send?</h2><div><span>{cartCount} {cartCount === 1 ? "item" : "items"}</span><strong>KSh {cartTotal.toLocaleString("en-KE")}</strong></div><p>Confirming sends this order to the kitchen.</p><button className="primary-button" type="button" disabled={orderSubmitting} onClick={() => void confirmOrder()}>{orderSubmitting ? "Sending order…" : "Confirm order"} <span aria-hidden="true">→</span></button></aside></div>}
 
         {orderActive && confirmedOrder && <>
           <div className="confirmed-order-layout"><div className="confirmed-order-main">
-            <section className="order-tracker-panel"><div className="order-tracker-heading"><div><p className="eyebrow">KITCHEN STATUS</p><h2>{confirmedOrder.status === "ready" ? "Your order is ready" : confirmedOrder.status === "cooking" ? "The kitchen is cooking" : "Order received"}</h2></div><span className={`tracker-status status-${confirmedOrder.status}`}>{confirmedOrder.status === "confirmed" ? "CONFIRMED" : confirmedOrder.status.toUpperCase()}</span></div><div className="order-progress-steps">{(["confirmed", "cooking", "ready"] as const).map((status, index) => { const statusIndex = ["confirmed", "cooking", "ready"].indexOf(confirmedOrder.status); const currentIndex = index; const complete = statusIndex >= currentIndex; return <div className={`order-progress-step${complete ? " is-complete" : ""}${confirmedOrder.status === status ? " is-current" : ""}`} key={status}><span className="progress-step-mark">{complete ? "✓" : String(index + 1).padStart(2, "0")}</span><span>{status === "confirmed" ? "Received" : status === "cooking" ? "Cooking" : "Ready"}</span></div>; })}</div><p className="tracker-explanation">{confirmedOrder.status === "confirmed" ? "Order confirmed in this preview. Live kitchen updates will appear when cook tools are connected." : confirmedOrder.status === "cooking" ? "The cook is preparing your order." : "Please wait for your waiter to bring your order."}</p></section>
+            <section className="order-tracker-panel"><div className="order-tracker-heading"><div><p className="eyebrow">KITCHEN STATUS</p><h2>{confirmedOrder.status === "ready" ? "Your order is ready" : confirmedOrder.status === "cooking" ? "The kitchen is cooking" : "Order received"}</h2></div><span className={`tracker-status status-${confirmedOrder.status}`}>{confirmedOrder.status === "confirmed" ? "CONFIRMED" : confirmedOrder.status.toUpperCase()}</span></div><div className="order-progress-steps">{(["confirmed", "cooking", "ready"] as const).map((status, index) => { const statusIndex = ["confirmed", "cooking", "ready"].indexOf(confirmedOrder.status); const currentIndex = index; const complete = statusIndex >= currentIndex; return <div className={`order-progress-step${complete ? " is-complete" : ""}${confirmedOrder.status === status ? " is-current" : ""}`} key={status}><span className="progress-step-mark">{complete ? "✓" : String(index + 1).padStart(2, "0")}</span><span>{status === "confirmed" ? "Received" : status === "cooking" ? "Cooking" : "Ready"}</span></div>; })}</div><p className="tracker-explanation">{confirmedOrder.status === "confirmed" ? "Your order has been received and is being sent to the kitchen." : confirmedOrder.status === "cooking" ? "The cook is preparing your order." : "Please wait for your waiter to bring your order."}</p></section>
             <section className="confirmed-lines-panel"><div className="confirmed-lines-heading"><div><p className="eyebrow">ORDER DETAILS</p><h2>Order {confirmedOrder.number}</h2></div>{confirmedOrder.tableNumber && <span className="order-table-tag">Table {confirmedOrder.tableNumber}</span>}</div>{confirmedOrder.lines.map((line) => <article className="confirmed-order-line" key={`${line.itemId}-${line.specification}`}>{line.image ? <Image src={line.image} alt="" width={64} height={56} unoptimized /> : <span className="order-line-placeholder">{line.name.slice(0, 1)}</span>}<div><strong>{line.name}</strong>{line.specification && <span>{line.specification}</span>}<small>{line.quantity} × KSh {line.price.toLocaleString("en-KE")}</small></div><strong>KSh {(line.quantity * line.price).toLocaleString("en-KE")}</strong></article>)}<div className="confirmed-total"><span>Total</span><strong>KSh {confirmedOrder.total.toLocaleString("en-KE")}</strong></div></section>
             {orderNotice && <p className="order-action-notice" role="status">{orderNotice}</p>}
-            <section className="order-service-actions"><button className={`secondary-button${confirmedOrder.billRequested ? " is-requested" : ""}`} type="button" disabled={confirmedOrder.billRequested} onClick={() => requestService("bill")}><span className="service-action-symbol">B</span><span><strong>{confirmedOrder.billRequested ? "Bill requested" : "Request bill"}</strong><small>{confirmedOrder.billRequested ? "Cashier request recorded" : "Pay the cashier in person"}</small></span></button><button className={`secondary-button${confirmedOrder.waiterCalled ? " is-requested" : ""}`} type="button" disabled={confirmedOrder.waiterCalled} onClick={() => requestService("waiter")}><span className="service-action-symbol waiter-action-symbol">W</span><span><strong>{confirmedOrder.waiterCalled ? "Waiter called" : "Call waiter"}</strong><small>{confirmedOrder.waiterCalled ? "Request recorded" : "Ask for assistance"}</small></span></button><button className="primary-button" type="button" disabled={confirmedOrder.paymentStatus !== "unpaid"} onClick={() => { setPaymentOpen((current) => !current); setPaymentCopyMessage(""); }}><span className="service-action-symbol pay-action-symbol">KSh</span><span><strong>{confirmedOrder.paymentStatus === "pending" ? "Payment pending" : confirmedOrder.paymentStatus === "paid" ? "Paid" : "Pay directly"}</strong><small>{confirmedOrder.paymentStatus === "unpaid" ? "M-Pesa payment options" : "Awaiting payment verification"}</small></span></button></section>
+            <section className="order-service-actions"><button className={`secondary-button${confirmedOrder.billRequested ? " is-requested" : ""}`} type="button" disabled={confirmedOrder.billRequested} onClick={() => void requestService("bill")}><span className="service-action-symbol">B</span><span><strong>{confirmedOrder.billRequested ? "Bill requested" : "Request bill"}</strong><small>{confirmedOrder.billRequested ? "Service team notified" : "Pay the cashier in person"}</small></span></button><button className={`secondary-button${confirmedOrder.waiterCalled ? " is-requested" : ""}`} type="button" disabled={confirmedOrder.waiterCalled} onClick={() => void requestService("waiter")}><span className="service-action-symbol waiter-action-symbol">W</span><span><strong>{confirmedOrder.waiterCalled ? "Waiter called" : "Call waiter"}</strong><small>{confirmedOrder.waiterCalled ? "Request sent to service" : "Ask for assistance"}</small></span></button><button className="primary-button" type="button" disabled={confirmedOrder.paymentStatus !== "unpaid"} onClick={() => { setPaymentOpen((current) => !current); setPaymentCopyMessage(""); }}><span className="service-action-symbol pay-action-symbol">KSh</span><span><strong>{confirmedOrder.paymentStatus === "pending" ? "Payment pending" : confirmedOrder.paymentStatus === "paid" ? "Paid" : "Pay directly"}</strong><small>{confirmedOrder.paymentStatus === "unpaid" ? "M-Pesa payment options" : "Awaiting payment verification"}</small></span></button></section>
             {paymentOpen && <section className="payment-detail-panel"><div className="payment-detail-heading"><div><p className="eyebrow">M-PESA PAYMENT</p><h2>Pay KSh {confirmedOrder.total.toLocaleString("en-KE")}</h2></div><button className="dialog-close" type="button" aria-label="Close payment details" onClick={() => setPaymentOpen(false)}>×</button></div><p className="payment-detail-copy">Send the exact amount using the restaurant details below. This preview cannot verify payments.</p><dl className="payment-detail-list"><div><dt>Method</dt><dd>{profile.paymentMethod || "Not configured"}</dd></div><div><dt>Payment number</dt><dd>{profile.paymentNumber || "Not set in restaurant profile"}</dd></div>{profile.paymentMethod === "Paybill" && <div><dt>Account/reference</dt><dd>Order {confirmedOrder.number}</dd></div>}</dl><button className="copy-payment-button" type="button" disabled={!profile.paymentNumber} onClick={copyPaymentNumber}>{paymentCopyMessage.includes("copied") ? "Copied" : "Copy payment number"}</button><div className="stk-preview"><span><strong>Request STK push</strong><small>Secure M-Pesa confirmation will be enabled with server payment integration.</small></span><button className="secondary-button" type="button" disabled>STK push unavailable</button></div><button className="primary-button report-payment-button" type="button" disabled={!profile.paymentNumber || confirmedOrder.paymentStatus !== "unpaid"} onClick={submitPaymentIntent}>I&apos;ve sent the payment</button>{paymentCopyMessage && <p className="payment-status-message" role="status">{paymentCopyMessage}</p>}</section>}
             {confirmedOrder.paymentStatus === "pending" && <p className="pending-payment-notice">Payment reported. It is not verified yet, so no invoice has been issued.</p>}
             {confirmedOrder.paymentStatus === "paid" && confirmedOrder.invoiceNumber && <section className="invoice-panel"><p className="eyebrow">PAYMENT RECEIPT</p><h2>Invoice {confirmedOrder.invoiceNumber}</h2><p>Payment verified for KSh {confirmedOrder.total.toLocaleString("en-KE")}.</p></section>}
@@ -360,6 +435,21 @@ export function CustomerExperience({ items, profile, isOpen, tableNumber }: Cust
         <form className="booking-preview-form" onSubmit={submitBooking}><label><span>Date</span><input type="date" required min={new Date().toISOString().slice(0, 10)} /></label><label><span>Time</span><input type="time" required /></label><label><span>Guests</span><input type="number" min="1" max="20" value={guestCount} onChange={(event) => setGuestCount(event.target.value)} /></label><button className="primary-button" type="submit">Check availability <span aria-hidden="true">→</span></button>{bookingMessage && <p className="booking-preview-note" role="status">{bookingMessage}</p>}</form>
         <div className="booking-info-strip"><span className={`status-dot${isOpen ? " available-dot" : ""}`} /><strong>{isOpen ? "Taking reservations" : "Currently closed"}</strong><span>Table bookings will connect after the order flow is designed.</span></div>
       </section>}
+      {waiterRequestOpen && (
+        <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && setWaiterRequestOpen(false)}>
+          <section className="dialog-card waiter-request-dialog" role="dialog" aria-modal="true" aria-labelledby="waiter-request-title">
+            <button className="dialog-close" type="button" onClick={() => setWaiterRequestOpen(false)} aria-label="Close waiter request">×</button>
+            <p className="eyebrow">TABLE {confirmedOrder?.tableNumber}</p><h2 id="waiter-request-title">What do you need?</h2>
+            <p className="dialog-description">Your request will be sent to the waiter serving your table.</p>
+            <form className="waiter-request-form" onSubmit={submitWaiterRequest}>
+              <label className="profile-field"><span>Reason</span><select value={waiterRequestReason} onChange={(event) => setWaiterRequestReason(event.target.value)}><option>Water</option><option>Assistance</option><option>Utensils</option><option>Other</option></select></label>
+              <label className="profile-field"><span>Details {waiterRequestReason === "Other" && <small>Required</small>}</span><textarea rows={3} maxLength={500} required={waiterRequestReason === "Other"} placeholder="Add a short note for your waiter" value={waiterRequestDetails} onChange={(event) => setWaiterRequestDetails(event.target.value)} /></label>
+              {orderNotice && <p className="field-error" role="alert">{orderNotice}</p>}
+              <div className="dialog-actions"><button className="secondary-button" type="button" onClick={() => setWaiterRequestOpen(false)}>Cancel</button><button className="primary-button" type="submit" disabled={serviceRequestSubmitting}>{serviceRequestSubmitting ? "Sending…" : "Send request"}</button></div>
+            </form>
+          </section>
+        </div>
+      )}
     </main>
   );
 }

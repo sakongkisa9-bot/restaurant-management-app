@@ -7,6 +7,7 @@ import { MenuManagement, type MenuItem } from "./menu-management";
 import { defaultRestaurantProfile, RestaurantProfile, type RestaurantProfileData } from "./restaurant-profile";
 import { StaffTracker } from "./staff-tracker";
 import { DeveloperDashboard } from "./developer-dashboard";
+import { WaiterPage } from "./waiter-page";
 import { buildCustomerUrl } from "../lib/tenant";
 
 type Workspace = "customer" | "admin" | "waiter" | "cook" | "cashier" | "developer";
@@ -16,6 +17,7 @@ type BusinessDay = { enabled: boolean; open: string; close: string };
 type Schedule = Record<DayName, BusinessDay>;
 type CustomerFeedback = { id: string; type: "recommendation" | "complaint"; message: string; orderNumber: string | null; createdAt: string };
 type RestaurantOption = Pick<RestaurantProfileData, "name" | "slug">;
+type WaiterOption = { id: string; name: string };
 
 function parseCustomerFeedback(value: unknown): CustomerFeedback | null {
   if (typeof value !== "object" || value === null || Array.isArray(value)
@@ -167,6 +169,14 @@ export default function Home() {
   const [adminRestaurantOptions, setAdminRestaurantOptions] = useState<RestaurantOption[]>([]);
   const [selectedAdminRestaurantSlug, setSelectedAdminRestaurantSlug] = useState("");
   const [showAdminRestaurantPicker, setShowAdminRestaurantPicker] = useState(false);
+  const [showWaiterLogin, setShowWaiterLogin] = useState(false);
+  const [selectedWaiterRestaurantSlug, setSelectedWaiterRestaurantSlug] = useState("");
+  const [waiterRestaurantId, setWaiterRestaurantId] = useState("");
+  const [waiterOptions, setWaiterOptions] = useState<WaiterOption[]>([]);
+  const [selectedWaiterId, setSelectedWaiterId] = useState("");
+  const [waiterSecurityKey, setWaiterSecurityKey] = useState("");
+  const [waiterSignInError, setWaiterSignInError] = useState("");
+  const [waiterSignInSubmitting, setWaiterSignInSubmitting] = useState(false);
 
   const loadRestaurantOptions = useCallback(async () => {
     setRestaurantLookupLoading(true);
@@ -355,9 +365,87 @@ export default function Home() {
       setShowPassword(true);
       return;
     }
+    if (nextWorkspace === "waiter") {
+      setSelectedWaiterRestaurantSlug(restaurantSlug);
+      setWaiterRestaurantId("");
+      setWaiterOptions([]);
+      setSelectedWaiterId("");
+      setWaiterSecurityKey("");
+      setWaiterSignInError("");
+      setShowWaiterLogin(true);
+      if (!restaurantSlug) void loadRestaurantOptions();
+      return;
+    }
     if (nextWorkspace === "customer" && !restaurantSlug) void loadRestaurantOptions();
     setWorkspace(nextWorkspace);
     setAdminPage("Overview");
+  }
+
+  useEffect(() => {
+    if (!showWaiterLogin || !selectedWaiterRestaurantSlug) return;
+    let active = true;
+    const timer = window.setTimeout(async () => {
+      setWaiterSignInError("");
+      try {
+        const response = await fetch(`/api/waiter/login?slug=${encodeURIComponent(selectedWaiterRestaurantSlug)}`, { cache: "no-store" });
+        const payload: unknown = await response.json();
+        if (!response.ok || typeof payload !== "object" || payload === null
+          || !("restaurantId" in payload) || typeof payload.restaurantId !== "string"
+          || !("waiters" in payload) || !Array.isArray(payload.waiters)) {
+          throw new Error(responseError(payload, "Could not load this restaurant’s waiters."));
+        }
+        const options = payload.waiters.filter((waiter): waiter is WaiterOption =>
+          typeof waiter === "object" && waiter !== null && "id" in waiter && typeof waiter.id === "string"
+          && "name" in waiter && typeof waiter.name === "string");
+        if (active) {
+          setWaiterRestaurantId(payload.restaurantId);
+          setWaiterOptions(options);
+          setSelectedWaiterId(options[0]?.id ?? "");
+        }
+      } catch (loadError) {
+        if (active) setWaiterSignInError(loadError instanceof Error ? loadError.message : "Could not load this restaurant’s waiters.");
+      }
+    }, 0);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [selectedWaiterRestaurantSlug, showWaiterLogin]);
+
+  async function enterWaiterWorkspace(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!waiterRestaurantId || !selectedWaiterId || !waiterSecurityKey) {
+      setWaiterSignInError("Select your name and enter your security key.");
+      return;
+    }
+    setWaiterSignInSubmitting(true);
+    setWaiterSignInError("");
+    try {
+      const response = await fetch("/api/waiter/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ restaurantId: waiterRestaurantId, staffId: selectedWaiterId, securityKey: waiterSecurityKey }),
+      });
+      const payload: unknown = await response.json();
+      if (!response.ok) throw new Error(responseError(payload, "Waiter sign in failed."));
+      if (selectedWaiterRestaurantSlug && selectedWaiterRestaurantSlug !== restaurantSlug) {
+        setRestaurantSlug(selectedWaiterRestaurantSlug);
+        void loadRestaurantData(selectedWaiterRestaurantSlug);
+      }
+      setShowWaiterLogin(false);
+      setWaiterSecurityKey("");
+      setWorkspace("waiter");
+    } catch (loginError) {
+      setWaiterSignInError(loginError instanceof Error ? loginError.message : "Waiter sign in failed.");
+    } finally {
+      setWaiterSignInSubmitting(false);
+    }
+  }
+
+  async function signOutWaiter() {
+    const response = await fetch("/api/waiter/logout", { method: "POST" });
+    if (!response.ok) throw new Error("Could not sign out. Please try again.");
+    setWorkspace("customer");
   }
 
   function continueToAdminSignIn(event: React.FormEvent<HTMLFormElement>) {
@@ -564,7 +652,7 @@ export default function Home() {
           </div>
           <div className="topbar-meta">
             <span className="topbar-date">Live service</span>
-            {restaurantProfile.logo ? <Image src={restaurantProfile.logo} alt="" className="user-avatar profile-avatar-image" width={32} height={32} unoptimized /> : <span className="user-avatar" aria-label="Restaurant profile">R</span>}
+            {workspace !== "waiter" && (restaurantProfile.logo ? <Image src={restaurantProfile.logo} alt="" className="user-avatar profile-avatar-image" width={32} height={32} unoptimized /> : <span className="user-avatar" aria-label="Restaurant profile">R</span>)}
           </div>
         </header>
 
@@ -802,6 +890,8 @@ export default function Home() {
               </section>
             )}
           </main>
+        ) : workspace === "waiter" ? (
+          <WaiterPage onSignOut={signOutWaiter} />
         ) : workspace === "developer" ? (
           <DeveloperDashboard />
         ) : workspace === "customer" && restaurantSuspended ? (
@@ -841,6 +931,47 @@ export default function Home() {
                 {passwordError && <p className="field-error" role="alert">{passwordError}</p>}
                 <button className="primary-button dialog-submit" type="submit" disabled={!selectedAdminRestaurantSlug}>Continue <span aria-hidden="true">→</span></button>
               </form>
+            )}
+
+            {showWaiterLogin && (
+              <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && setShowWaiterLogin(false)}>
+                <section className="dialog-card" role="dialog" aria-modal="true" aria-labelledby="waiter-login-title">
+                  <button className="dialog-close" type="button" onClick={() => setShowWaiterLogin(false)} aria-label="Close waiter sign in">×</button>
+                  <div className="dialog-mark">W</div>
+                  <p className="eyebrow">WAITER SIGN IN</p>
+                  <h2 id="waiter-login-title">Open your service board</h2>
+                  <p className="dialog-description">Choose your restaurant and staff profile, then enter the security key set in the staff tracker.</p>
+                  <form onSubmit={(event) => void enterWaiterWorkspace(event)}>
+                    {!restaurantSlug && (
+                      <label className="profile-field restaurant-lookup-field" htmlFor="waiter-restaurant">
+                        <span>Restaurant</span>
+                        <select id="waiter-restaurant" value={selectedWaiterRestaurantSlug} onChange={(event) => {
+                          setSelectedWaiterRestaurantSlug(event.target.value);
+                          setWaiterOptions([]);
+                          setWaiterRestaurantId("");
+                          setSelectedWaiterId("");
+                        }}>
+                          <option value="">Select a restaurant</option>
+                          {restaurants.map((restaurant) => <option value={restaurant.slug} key={restaurant.slug}>{restaurant.name}</option>)}
+                        </select>
+                      </label>
+                    )}
+                    {!restaurantSlug && restaurantLookupError && <p className="field-error" role="alert">{restaurantLookupError}</p>}
+                    {restaurantSlug && <p className="waiter-login-restaurant">{restaurantProfile.name}</p>}
+                    <label className="profile-field restaurant-lookup-field" htmlFor="waiter-name">
+                      <span>Waiter</span>
+                      <select id="waiter-name" value={selectedWaiterId} onChange={(event) => setSelectedWaiterId(event.target.value)} disabled={!waiterOptions.length}>
+                        <option value="">{waiterOptions.length ? "Select your staff profile" : "No waiter profiles available"}</option>
+                        {waiterOptions.map((waiter) => <option value={waiter.id} key={waiter.id}>{waiter.name}</option>)}
+                      </select>
+                    </label>
+                    {selectedWaiterRestaurantSlug && !waiterOptions.length && !waiterSignInError && <p className="restaurant-lookup-status">No waiter profiles are set up for this restaurant yet.</p>}
+                    <label className="profile-field waiter-key-field" htmlFor="waiter-security-key"><span>Security key</span><input id="waiter-security-key" type="password" autoComplete="current-password" value={waiterSecurityKey} onChange={(event) => setWaiterSecurityKey(event.target.value)} /></label>
+                    {waiterSignInError && <p className="field-error" role="alert">{waiterSignInError}</p>}
+                    <button className="primary-button dialog-submit" type="submit" disabled={waiterSignInSubmitting || !waiterOptions.length}>{waiterSignInSubmitting ? "Signing in…" : "Continue to waiter page"} <span aria-hidden="true">→</span></button>
+                  </form>
+                </section>
+              </div>
             )}
           </section>
         </div>

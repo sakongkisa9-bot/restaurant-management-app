@@ -51,3 +51,7 @@ and restaurant admins can change their own password from Restaurant profile.
 Payment status is currently managed manually. When auto-suspension is enabled, customer
 restaurant access and order creation are blocked until all non-zero installation and monthly
 fees are marked paid. Restaurant admins can still sign in while customer access is suspended.
+
+Before deploying the waiter service board, also apply
+[`0002_waiter_workflow.sql`](./src/lib/migrations/0002_waiter_workflow.sql). It adds
+waiter assignment and customer service-request state to existing orders.
