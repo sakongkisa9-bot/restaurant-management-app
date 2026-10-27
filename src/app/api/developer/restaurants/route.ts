@@ -1,14 +1,10 @@
 import { hash } from "bcryptjs";
 import { asc, eq, inArray } from "drizzle-orm";
 import { NextRequest } from "next/server";
-import { Client } from "pg";
-import { drizzle } from "drizzle-orm/node-postgres";
+import { db } from "@/lib/db";
 import { isDeveloperSession } from "@/lib/session-access";
 import { slugify } from "@/lib/tenant";
 import { customerFeedback, menuItems, orderLines, orders, restaurants, staffMembers } from "@/lib/schema";
-
-const client = process.env.DATABASE_URL ? new Client({ connectionString: process.env.DATABASE_URL }) : null;
-const db = client ? drizzle({ client }) : null;
 
 function isMoneyAmount(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;

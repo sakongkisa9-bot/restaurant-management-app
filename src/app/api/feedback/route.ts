@@ -1,11 +1,7 @@
 import { eq } from "drizzle-orm";
 import { NextRequest } from "next/server";
-import { Client } from "pg";
-import { drizzle } from "drizzle-orm/node-postgres";
+import { db } from "@/lib/db";
 import { customerFeedback } from "@/lib/schema";
-
-const client = process.env.DATABASE_URL ? new Client({ connectionString: process.env.DATABASE_URL }) : null;
-const db = client ? drizzle({ client }) : null;
 
 export async function GET(request: NextRequest) {
   if (!db) {

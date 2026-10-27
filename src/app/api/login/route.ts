@@ -1,13 +1,9 @@
 import { compare } from "bcryptjs";
 import { NextRequest } from "next/server";
-import { Client } from "pg";
-import { drizzle } from "drizzle-orm/node-postgres";
 import { eq } from "drizzle-orm";
+import { db } from "@/lib/db";
 import { staffMembers } from "@/lib/schema";
 import { setSessionToken, signSession } from "@/lib/auth";
-
-const client = process.env.DATABASE_URL ? new Client({ connectionString: process.env.DATABASE_URL }) : null;
-const db = client ? drizzle({ client }) : null;
 
 export async function POST(request: NextRequest) {
   if (!db) {

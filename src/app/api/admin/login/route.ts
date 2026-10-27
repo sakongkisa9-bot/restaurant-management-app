@@ -1,13 +1,9 @@
 import { compare } from "bcryptjs";
 import { eq } from "drizzle-orm";
 import { NextRequest } from "next/server";
-import { Client } from "pg";
-import { drizzle } from "drizzle-orm/node-postgres";
 import { setSessionToken, signSession } from "@/lib/auth";
+import { db } from "@/lib/db";
 import { restaurants } from "@/lib/schema";
-
-const client = process.env.DATABASE_URL ? new Client({ connectionString: process.env.DATABASE_URL }) : null;
-const db = client ? drizzle({ client }) : null;
 
 export async function POST(request: NextRequest) {
   if (!db) return Response.json({ error: "DATABASE_URL not configured" }, { status: 500 });

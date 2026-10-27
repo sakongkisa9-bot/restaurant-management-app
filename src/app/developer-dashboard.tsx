@@ -62,7 +62,7 @@ export function DeveloperDashboard() {
     setLoading(true);
     setError("");
     try {
-      const response = await fetch("/api/developer/restaurants");
+      const response = await fetch("/api/developer/restaurants", { signal: AbortSignal.timeout(15_000) });
       const payload: unknown = await response.json();
       if (!response.ok) {
         const message = typeof payload === "object" && payload !== null && "error" in payload && typeof payload.error === "string"
@@ -129,6 +129,7 @@ export function DeveloperDashboard() {
         method: editingId ? "PUT" : "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
+        signal: AbortSignal.timeout(20_000),
       });
       const payload: unknown = await response.json();
       if (!response.ok) {
@@ -141,7 +142,9 @@ export function DeveloperDashboard() {
       setNotice(editingId ? "Restaurant details saved." : "Restaurant registered.");
       await loadRestaurants();
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : "Could not save this restaurant.");
+      setError(saveError instanceof DOMException && saveError.name === "TimeoutError"
+        ? "The request timed out. Refresh the restaurant list before retrying to check whether the save completed."
+        : saveError instanceof Error ? saveError.message : "Could not save this restaurant.");
     } finally {
       setSaving(false);
     }
