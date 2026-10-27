@@ -55,3 +55,8 @@ fees are marked paid. Restaurant admins can still sign in while customer access 
 Before deploying the waiter service board, also apply
 [`0002_waiter_workflow.sql`](./src/lib/migrations/0002_waiter_workflow.sql). It adds
 waiter assignment and customer service-request state to existing orders.
+
+Apply [`0003_customer_order_sessions.sql`](./src/lib/migrations/0003_customer_order_sessions.sql)
+as well to support per-visit customer orders and cancellation notices. Customers can cancel
+only while an order is awaiting waiter approval. Cancelled orders remain recorded for kitchen
+notification handling and are excluded from occupied-table counts.

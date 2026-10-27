@@ -42,10 +42,14 @@ export async function POST(request: NextRequest) {
     return Response.json({ error: "Order details are required" }, { status: 400 });
   }
   const restaurantId = "restaurantId" in payload && typeof payload.restaurantId === "string" ? payload.restaurantId.trim() : "";
+  const customerSessionId = "customerSessionId" in payload && typeof payload.customerSessionId === "string"
+    ? payload.customerSessionId
+    : "";
   const tableNumber = "tableNumber" in payload ? Number(payload.tableNumber) : 0;
   const rawLines = "lines" in payload && Array.isArray(payload.lines) ? payload.lines : [];
   const lines = rawLines.map(parseOrderLine).filter((line): line is OrderLineInput => line !== null);
-  if (!restaurantId || !Number.isInteger(tableNumber) || tableNumber < 1 || lines.length === 0 || lines.length !== rawLines.length) {
+  if (!restaurantId || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(customerSessionId)
+    || !Number.isInteger(tableNumber) || tableNumber < 1 || lines.length === 0 || lines.length !== rawLines.length) {
     return Response.json({ error: "A valid table number and at least one valid order item are required" }, { status: 400 });
   }
   const restaurant = (await db.select({
@@ -99,6 +103,7 @@ export async function POST(request: NextRequest) {
       orderNumber,
       status: "confirmed",
       total,
+      customerSessionId,
       billRequested: false,
       waiterCalled: false,
       paymentStatus: "unpaid",

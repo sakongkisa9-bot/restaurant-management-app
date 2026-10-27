@@ -26,6 +26,8 @@ type ActiveOrder = {
   waiterCallReason: string;
   waiterCallDetails: string;
   assignedWaiterId: string | null;
+  waiterCancellationResolved: boolean;
+  cookCancellationResolved: boolean;
   lines: OrderLine[];
 };
 type DashboardData = {
@@ -39,7 +41,7 @@ type WaiterPageProps = { onSignOut: () => Promise<void> };
 type Notification = {
   id: string;
   order: ActiveOrder;
-  kind: "order" | "call" | "bill";
+  kind: "order" | "call" | "bill" | "cancelled";
   title: string;
   description: string;
 };
@@ -73,6 +75,8 @@ function isDashboardData(value: unknown): value is DashboardData {
     && "waiterCallReason" in order && typeof order.waiterCallReason === "string"
     && "waiterCallDetails" in order && typeof order.waiterCallDetails === "string"
     && "assignedWaiterId" in order && isStringOrNull(order.assignedWaiterId)
+    && "waiterCancellationResolved" in order && typeof order.waiterCancellationResolved === "boolean"
+    && "cookCancellationResolved" in order && typeof order.cookCancellationResolved === "boolean"
     && "lines" in order && Array.isArray(order.lines) && order.lines.every((line) => typeof line === "object" && line !== null
       && "name" in line && typeof line.name === "string"
       && "quantity" in line && typeof line.quantity === "number");
@@ -153,6 +157,15 @@ export function WaiterPage({ onSignOut }: WaiterPageProps) {
     if (!data) return [];
     return data.orders.flatMap((order) => {
       const notificationsForOrder: Notification[] = [];
+      if (order.status === "cancelled" && !order.waiterCancellationResolved) {
+        notificationsForOrder.push({
+          id: `${order.id}-cancelled`,
+          order,
+          kind: "cancelled",
+          title: `Order cancelled · Table ${order.tableNumber}`,
+          description: `${order.orderNumber} · ${order.lines.map((line) => `${line.quantity} × ${line.name}`).join(", ")}`,
+        });
+      }
       if (order.status === "confirmed" && !order.assignedWaiterId) {
         notificationsForOrder.push({
           id: `${order.id}-order`,
@@ -162,7 +175,7 @@ export function WaiterPage({ onSignOut }: WaiterPageProps) {
           description: `${order.orderNumber} · ${order.lines.map((line) => `${line.quantity} × ${line.name}`).join(", ")}`,
         });
       }
-      if (order.waiterCalled && !order.waiterCallResolved
+      if (order.status !== "cancelled" && order.waiterCalled && !order.waiterCallResolved
         && (!order.assignedWaiterId || order.assignedWaiterId === data.waiter.id)) {
         notificationsForOrder.push({
           id: `${order.id}-call`,
@@ -172,7 +185,7 @@ export function WaiterPage({ onSignOut }: WaiterPageProps) {
           description: [order.waiterCallReason, order.waiterCallDetails].filter(Boolean).join(" · "),
         });
       }
-      if (order.billRequested && !order.billRequestResolved
+      if (order.status !== "cancelled" && order.billRequested && !order.billRequestResolved
         && (!order.assignedWaiterId || order.assignedWaiterId === data.waiter.id)) {
         notificationsForOrder.push({
           id: `${order.id}-bill`,
@@ -193,7 +206,11 @@ export function WaiterPage({ onSignOut }: WaiterPageProps) {
       const response = await fetch(`/api/waiter/orders/${encodeURIComponent(notification.order.id)}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: notification.kind === "order" ? "approve" : `resolve-${notification.kind}` }),
+        body: JSON.stringify({
+          action: notification.kind === "order" ? "approve"
+            : notification.kind === "cancelled" ? "resolve-cancelled"
+              : `resolve-${notification.kind}`,
+        }),
       });
       const payload: unknown = await response.json();
       if (!response.ok) throw new Error(responseError(payload, "Could not update this notification."));
@@ -294,10 +311,10 @@ export function WaiterPage({ onSignOut }: WaiterPageProps) {
         <div className="waiter-notification-list" aria-live="polite">
           {notifications.length ? notifications.map((notification) => (
             <article className={`waiter-notification-card notification-${notification.kind}`} key={notification.id}>
-              <span className="waiter-notification-mark" aria-hidden="true">{notification.kind === "order" ? "O" : notification.kind === "call" ? "!" : "$"}</span>
+              <span className="waiter-notification-mark" aria-hidden="true">{notification.kind === "order" ? "O" : notification.kind === "call" ? "!" : notification.kind === "bill" ? "$" : "×"}</span>
               <div className="waiter-notification-copy"><strong>{notification.title}</strong><p>{notification.description || "A customer needs assistance."}</p><small>{new Date(notification.order.createdAt).toLocaleTimeString("en-KE", { hour: "2-digit", minute: "2-digit" })}</small></div>
               <button className="primary-button waiter-notification-action" type="button" disabled={busyNotification === notification.id} onClick={() => void handleNotification(notification)}>
-                {busyNotification === notification.id ? "Updating…" : notification.kind === "order" ? "Approve & assign to me" : "Mark handled"}
+                {busyNotification === notification.id ? "Updating…" : notification.kind === "order" ? "Approve & assign to me" : notification.kind === "cancelled" ? "Acknowledge" : "Mark handled"}
               </button>
             </article>
           )) : <div className="waiter-notification-empty"><span aria-hidden="true">✓</span><strong>You&apos;re all caught up</strong><p>New orders and customer requests will appear here.</p></div>}

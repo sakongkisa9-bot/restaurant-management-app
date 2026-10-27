@@ -2236,6 +2236,15 @@ p {
     border-left-color: #bd785a;
   }
 
+  .waiter-notification-card.notification-cancelled {
+    border-left-color: #bb665c;
+  }
+
+  .notification-cancelled .waiter-notification-mark {
+    background: #faeeec;
+    color: #a44f46;
+  }
+
   .waiter-notification-mark {
     align-items: center;
     background: #edf3e9;
@@ -6347,6 +6356,24 @@ p {
   display: grid;
   gap: 8px;
   grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.order-cancel-action {
+  display: grid;
+  gap: 6px;
+  justify-items: start;
+  margin-top: 12px;
+}
+
+.order-cancel-action button {
+  border-color: #e4c9c4;
+  color: #9c4e46;
+}
+
+.order-cancel-action p {
+  color: #828d84;
+  font-size: 8px;
+  margin: 0;
 }
 
 .order-service-actions > button {

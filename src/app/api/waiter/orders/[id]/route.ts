@@ -51,6 +51,18 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     return Response.json({ ok: true, assignedToMe: order.assignedWaiterId === staffId, assigned: true });
   }
 
+  if (action === "resolve-cancelled") {
+    const updated = await db.update(orders).set({
+      waiterCancellationResolved: true,
+      updatedAt: new Date(),
+    }).where(and(
+      baseCondition,
+      eq(orders.status, "cancelled"),
+      eq(orders.waiterCancellationResolved, false),
+    )).returning({ id: orders.id });
+    return Response.json({ ok: true, resolved: Boolean(updated[0]) });
+  }
+
   if (action === "resolve-call" || action === "resolve-bill") {
     const isCall = action === "resolve-call";
     const updated = await db.update(orders).set({

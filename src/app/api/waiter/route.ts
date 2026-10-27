@@ -13,6 +13,9 @@ function isMissingWaiterWorkflowMigration(error: unknown) {
     "waiter_call_reason",
     "waiter_call_details",
     "assigned_waiter_id",
+    "customer_session_id",
+    "waiter_cancellation_resolved",
+    "cook_cancellation_resolved",
   ].some((column) => message.includes(column));
 }
 
@@ -62,7 +65,7 @@ export async function GET() {
   } catch (error) {
     if (isMissingWaiterWorkflowMigration(error)) {
       return Response.json({
-        error: "Waiter service database setup is incomplete. Apply src/lib/migrations/0002_waiter_workflow.sql to the configured PostgreSQL database, then refresh this page.",
+        error: "Waiter service database setup is incomplete. Apply src/lib/migrations/0002_waiter_workflow.sql and src/lib/migrations/0003_customer_order_sessions.sql to the configured PostgreSQL database, then refresh this page.",
         code: "WAITER_MIGRATION_REQUIRED",
       }, { status: 503 });
     }
@@ -93,13 +96,17 @@ export async function GET() {
     waiterCallReason: order.waiterCallReason ?? "",
     waiterCallDetails: order.waiterCallDetails ?? "",
     assignedWaiterId: order.assignedWaiterId,
+    waiterCancellationResolved: order.waiterCancellationResolved,
+    cookCancellationResolved: order.cookCancellationResolved,
     lines: (linesByOrder.get(order.id) ?? []).map((line) => ({
       name: line.itemName,
       quantity: line.quantity,
     })),
   }));
   const tableCount = Math.max(0, Math.min(restaurant[0].tableCount ?? 12, 200));
-  const occupiedTables = new Set(ordersForDashboard.map((order) => order.tableNumber));
+  const occupiedTables = new Set(ordersForDashboard
+    .filter((order) => order.status !== "cancelled" && order.status !== "completed")
+    .map((order) => order.tableNumber));
 
   return Response.json({
     waiter: member[0],

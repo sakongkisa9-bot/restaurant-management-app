@@ -7,7 +7,7 @@ import type { RestaurantProfileData } from "./restaurant-profile";
 
 type CustomerPage = "Menu" | "My order" | "Booking";
 type CartEntry = { itemId: string; quantity: number; specification: string };
-type OrderStatus = "confirmed" | "cooking" | "ready" | "completed";
+type OrderStatus = "confirmed" | "cooking" | "ready" | "completed" | "cancelled";
 type ConfirmedOrder = {
   id: string;
   number: string;
@@ -18,10 +18,15 @@ type ConfirmedOrder = {
   createdAt: string;
   billRequested: boolean;
   waiterCalled: boolean;
+  assignedWaiterId: string | null;
   paymentStatus: "unpaid" | "pending" | "paid";
   invoiceNumber?: string;
   ratings?: Record<string, number>;
 };
+
+function isOrderStatus(value: unknown): value is OrderStatus {
+  return typeof value === "string" && ["confirmed", "cooking", "ready", "completed", "cancelled"].includes(value);
+}
 
 function parseConfirmedOrder(value: unknown): ConfirmedOrder | null {
   if (typeof value !== "object" || value === null || Array.isArray(value)
@@ -30,10 +35,11 @@ function parseConfirmedOrder(value: unknown): ConfirmedOrder | null {
     || !("lines" in value) || !Array.isArray(value.lines)
     || !("total" in value) || typeof value.total !== "number"
     || !("tableNumber" in value) || typeof value.tableNumber !== "string"
-    || !("status" in value) || !["confirmed", "cooking", "ready", "completed"].includes(String(value.status))
+    || !("status" in value) || !["confirmed", "cooking", "ready", "completed", "cancelled"].includes(String(value.status))
     || !("createdAt" in value) || typeof value.createdAt !== "string"
     || !("billRequested" in value) || typeof value.billRequested !== "boolean"
     || !("waiterCalled" in value) || typeof value.waiterCalled !== "boolean"
+    || !("assignedWaiterId" in value) || (typeof value.assignedWaiterId !== "string" && value.assignedWaiterId !== null)
     || !("paymentStatus" in value) || !["unpaid", "pending", "paid"].includes(String(value.paymentStatus))) return null;
 
   const lines: ConfirmedOrder["lines"] = [];
@@ -58,6 +64,7 @@ function parseConfirmedOrder(value: unknown): ConfirmedOrder | null {
     createdAt: value.createdAt,
     billRequested: value.billRequested,
     waiterCalled: value.waiterCalled,
+    assignedWaiterId: value.assignedWaiterId,
     paymentStatus: value.paymentStatus as ConfirmedOrder["paymentStatus"],
   };
 }
@@ -84,6 +91,7 @@ export function CustomerExperience({ items, profile, isOpen, tableNumber }: Cust
   const [selectedSpecifications, setSelectedSpecifications] = useState<Record<string, string>>({});
   const [cart, setCart] = useState<CartEntry[]>([]);
   const [confirmedOrder, setConfirmedOrder] = useState<ConfirmedOrder | null>(null);
+  const [customerSessionId, setCustomerSessionId] = useState("");
   const [orderLoaded, setOrderLoaded] = useState(false);
   const [loadedOrderStorageKey, setLoadedOrderStorageKey] = useState("");
   const [paymentOpen, setPaymentOpen] = useState(false);
@@ -108,9 +116,32 @@ export function CustomerExperience({ items, profile, isOpen, tableNumber }: Cust
     const item = items.find((menuItem) => menuItem.id === entry.itemId);
     return total + (item?.price ?? 0) * entry.quantity;
   }, 0);
-  const orderActive = Boolean(confirmedOrder && confirmedOrder.status !== "completed");
+  const orderActive = Boolean(confirmedOrder && confirmedOrder.status !== "completed" && confirmedOrder.status !== "cancelled");
   const restaurantPhotos = profile.photos;
-  const orderStorageKey = profile.id ? `room.customer-order.v1.${profile.id}` : "";
+  const orderStorageKey = profile.id && tableNumber && customerSessionId
+    ? `room.customer-order.v2.${profile.id}.${tableNumber}.${customerSessionId}`
+    : "";
+
+  useEffect(() => {
+    if (!profile.id) return;
+    const visitStorageKey = `room.customer-visit.v1.${profile.id}.${tableNumber || "menu"}`;
+    let sessionId: string;
+    try {
+      const navigationType = (performance.getEntriesByType("navigation")[0] as PerformanceNavigationTiming | undefined)?.type;
+      const previousSession = window.sessionStorage.getItem(visitStorageKey);
+      sessionId = previousSession && (navigationType === "reload" || navigationType === "back_forward")
+        ? previousSession
+        : window.crypto.randomUUID();
+      window.sessionStorage.setItem(visitStorageKey, sessionId);
+    } catch {
+      const errorTimer = window.setTimeout(() => {
+        setOrderNotice("This browser could not start a secure order session. Please enable site storage and scan the table QR code again.");
+      }, 0);
+      return () => window.clearTimeout(errorTimer);
+    }
+    const timer = window.setTimeout(() => setCustomerSessionId(sessionId), 0);
+    return () => window.clearTimeout(timer);
+  }, [profile.id, tableNumber]);
 
   useEffect(() => {
     if (restaurantPhotos.length < 2) return;
@@ -122,7 +153,7 @@ export function CustomerExperience({ items, profile, isOpen, tableNumber }: Cust
     let active = true;
     const loadOrder = window.setTimeout(() => {
       try {
-        const storedOrder = orderStorageKey ? window.localStorage.getItem(orderStorageKey) : null;
+        const storedOrder = orderStorageKey ? window.sessionStorage.getItem(orderStorageKey) : null;
         const parsedOrder: unknown = storedOrder ? JSON.parse(storedOrder) : null;
         if (active) {
           setConfirmedOrder(parseConfirmedOrder(parsedOrder));
@@ -147,12 +178,66 @@ export function CustomerExperience({ items, profile, isOpen, tableNumber }: Cust
     if (!orderLoaded || loadedOrderStorageKey !== orderStorageKey) return;
     try {
       if (!orderStorageKey) return;
-      if (confirmedOrder) window.localStorage.setItem(orderStorageKey, JSON.stringify(confirmedOrder));
-      else window.localStorage.removeItem(orderStorageKey);
+      if (confirmedOrder) window.sessionStorage.setItem(orderStorageKey, JSON.stringify(confirmedOrder));
+      else window.sessionStorage.removeItem(orderStorageKey);
     } catch {
       return;
     }
   }, [confirmedOrder, loadedOrderStorageKey, orderLoaded, orderStorageKey]);
+
+  useEffect(() => {
+    const orderId = confirmedOrder?.id;
+    if (!orderLoaded || !orderActive || !orderId || !customerSessionId || !profile.id) return;
+    const restaurantId = profile.id;
+    let active = true;
+    const refreshOrder = async () => {
+      try {
+        const query = new URLSearchParams({ restaurantId, customerSessionId });
+        const response = await fetch(`/api/orders/${encodeURIComponent(orderId)}?${query}`, { cache: "no-store" });
+        const payload: unknown = await response.json();
+        const orderData = typeof payload === "object" && payload !== null && "order" in payload ? payload.order : null;
+        const status = typeof orderData === "object" && orderData !== null && "status" in orderData && isOrderStatus(orderData.status)
+          ? orderData.status
+          : null;
+        const assignedWaiterId = typeof orderData === "object" && orderData !== null && "assignedWaiterId" in orderData
+          ? orderData.assignedWaiterId
+          : undefined;
+        const billRequested = typeof orderData === "object" && orderData !== null && "billRequested" in orderData
+          ? orderData.billRequested
+          : undefined;
+        const waiterCalled = typeof orderData === "object" && orderData !== null && "waiterCalled" in orderData
+          ? orderData.waiterCalled
+          : undefined;
+        if (!response.ok || typeof orderData !== "object" || orderData === null
+          || status === null
+          || (typeof assignedWaiterId !== "string" && assignedWaiterId !== null)
+          || typeof billRequested !== "boolean"
+          || typeof waiterCalled !== "boolean") {
+          const message = typeof payload === "object" && payload !== null && "error" in payload && typeof payload.error === "string"
+            ? payload.error
+            : "Could not refresh the order status.";
+          throw new Error(message);
+        }
+        if (active) {
+          setConfirmedOrder((current) => current ? {
+            ...current,
+            status,
+            assignedWaiterId,
+            billRequested,
+            waiterCalled,
+          } : current);
+        }
+      } catch (refreshError) {
+        if (active) setOrderNotice(refreshError instanceof Error ? refreshError.message : "Could not refresh the order status.");
+      }
+    };
+    const timer = window.setInterval(() => void refreshOrder(), 4_000);
+    void refreshOrder();
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [confirmedOrder?.id, customerSessionId, orderActive, orderLoaded, profile.id]);
 
   function openDish(item: MenuItem) {
     setSelectedFood(item);
@@ -160,7 +245,14 @@ export function CustomerExperience({ items, profile, isOpen, tableNumber }: Cust
   }
 
   function addToCart() {
-    if (!selectedFood || selectedFood.available === false || orderActive) return;
+    if (!selectedFood || selectedFood.available === false) return;
+    if (orderActive) {
+      setOrderNotice("You already placed this order. Check My order.");
+      setSelectedFood(null);
+      setActivePage("My order");
+      return;
+    }
+    if (confirmedOrder) setConfirmedOrder(null);
     const specification = selectedSpecifications[selectedFood.id] ?? selectedFood.specifications?.[0] ?? "";
     setCart((current) => {
       const existing = current.find((entry) => entry.itemId === selectedFood.id && entry.specification === specification);
@@ -181,7 +273,7 @@ export function CustomerExperience({ items, profile, isOpen, tableNumber }: Cust
 
   async function confirmOrder() {
     if (cart.length === 0 || orderActive || orderSubmitting) return;
-    if (!profile.id || !tableNumber || !Number.isInteger(Number(tableNumber)) || Number(tableNumber) < 1) {
+    if (!profile.id || !customerSessionId || !tableNumber || !Number.isInteger(Number(tableNumber)) || Number(tableNumber) < 1) {
       setOrderNotice("Open this menu from a restaurant table QR code before confirming an order.");
       return;
     }
@@ -199,6 +291,7 @@ export function CustomerExperience({ items, profile, isOpen, tableNumber }: Cust
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           restaurantId: profile.id,
+          customerSessionId,
           tableNumber: Number(tableNumber),
           lines: lines.map(({ itemId, name, quantity, price, specification }) => ({ itemId, name, quantity, price, specification })),
         }),
@@ -223,6 +316,7 @@ export function CustomerExperience({ items, profile, isOpen, tableNumber }: Cust
         createdAt: new Date().toISOString(),
         billRequested: false,
         waiterCalled: false,
+        assignedWaiterId: null,
         paymentStatus: "unpaid",
       });
       setCart([]);
@@ -230,6 +324,33 @@ export function CustomerExperience({ items, profile, isOpen, tableNumber }: Cust
       setOrderNotice(submitError instanceof Error ? submitError.message : "The order could not be sent to the restaurant.");
     } finally {
       setOrderSubmitting(false);
+    }
+  }
+
+  async function cancelOrder() {
+    if (!confirmedOrder || !profile.id || !customerSessionId || confirmedOrder.status !== "confirmed"
+      || confirmedOrder.assignedWaiterId || serviceRequestSubmitting) return;
+    setServiceRequestSubmitting(true);
+    setOrderNotice("");
+    try {
+      const response = await fetch(`/api/orders/${encodeURIComponent(confirmedOrder.id)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ restaurantId: profile.id, customerSessionId, action: "cancel" }),
+      });
+      const payload: unknown = await response.json();
+      if (!response.ok) {
+        const message = typeof payload === "object" && payload !== null && "error" in payload && typeof payload.error === "string"
+          ? payload.error
+          : "This order could not be cancelled.";
+        throw new Error(message);
+      }
+      setConfirmedOrder((current) => current ? { ...current, status: "cancelled" } : current);
+      setOrderNotice("");
+    } catch (cancelError) {
+      setOrderNotice(cancelError instanceof Error ? cancelError.message : "This order could not be cancelled.");
+    } finally {
+      setServiceRequestSubmitting(false);
     }
   }
 
@@ -411,7 +532,8 @@ export function CustomerExperience({ items, profile, isOpen, tableNumber }: Cust
       {!selectedFood && activePage === "My order" && <section className="customer-subpage order-page">
         <div className="customer-subpage-heading"><div><p className="eyebrow">YOUR SELECTION</p><h1>My order</h1><p>{orderActive && confirmedOrder ? `Order ${confirmedOrder.number} · placed ${new Intl.DateTimeFormat("en-KE", { hour: "numeric", minute: "2-digit" }).format(new Date(confirmedOrder.createdAt))}` : "Review your choices before confirming with the kitchen."}</p></div><span className={`order-count-pill${orderActive ? " is-tracking" : ""}`}>{orderActive ? "TRACKING" : `${cartCount} ${cartCount === 1 ? "item" : "items"}`}</span></div>
         {orderNotice && !orderActive && <p className="order-action-notice" role="alert">{orderNotice}</p>}
-        {!orderActive && cart.length === 0 ? <div className="customer-empty-order"><span className="empty-icon">0</span><h2>Your order is empty</h2><p>Browse the menu and add something you love.</p><button className="primary-button" type="button" onClick={() => setActivePage("Menu")}>Browse menu <span aria-hidden="true">→</span></button></div> : !orderActive && <div className="order-review-layout"><div className="order-lines"><div className="order-lines-heading"><div><p className="eyebrow">CART REVIEW</p><h2>Check your order</h2></div><span>{cartCount} {cartCount === 1 ? "item" : "items"}</span></div>{cart.map((entry) => { const item = items.find((candidate) => candidate.id === entry.itemId); if (!item) return null; const image = dishImages(item)[0]; return <article className="order-line" key={`${entry.itemId}-${entry.specification}`}>
+        {confirmedOrder?.status === "cancelled" && <div className="customer-empty-order cancelled-order-state"><span className="empty-icon">×</span><h2>Order cancelled</h2><p>The cancellation was recorded and the service team has been notified.</p><button className="primary-button" type="button" onClick={() => setActivePage("Menu")}>Browse menu <span aria-hidden="true">→</span></button></div>}
+        {!orderActive && cart.length === 0 && confirmedOrder?.status !== "cancelled" ? <div className="customer-empty-order"><span className="empty-icon">0</span><h2>Your order is empty</h2><p>Browse the menu and add something you love.</p><button className="primary-button" type="button" onClick={() => setActivePage("Menu")}>Browse menu <span aria-hidden="true">→</span></button></div> : !orderActive && cart.length > 0 && <div className="order-review-layout"><div className="order-lines"><div className="order-lines-heading"><div><p className="eyebrow">CART REVIEW</p><h2>Check your order</h2></div><span>{cartCount} {cartCount === 1 ? "item" : "items"}</span></div>{cart.map((entry) => { const item = items.find((candidate) => candidate.id === entry.itemId); if (!item) return null; const image = dishImages(item)[0]; return <article className="order-line" key={`${entry.itemId}-${entry.specification}`}>
             {image ? <Image src={image} alt="" width={64} height={56} unoptimized /> : <span className="order-line-placeholder">{item.name.slice(0, 1)}</span>}<div className="order-line-info"><strong>{item.name}</strong>{entry.specification && <span>{entry.specification}</span>}<span>KSh {item.price.toLocaleString("en-KE")} each</span></div><div className="quantity-control"><button type="button" onClick={() => changeQuantity(entry, -1)} aria-label={`Remove one ${item.name}`}>−</button><span>{entry.quantity}</span><button type="button" onClick={() => changeQuantity(entry, 1)} aria-label={`Add one ${item.name}`}>+</button></div><strong className="order-line-total">KSh {(item.price * entry.quantity).toLocaleString("en-KE")}</strong>
           </article>; })}<button className="text-button continue-menu-button" type="button" onClick={() => setActivePage("Menu")}>← Continue browsing</button></div><aside className="order-summary"><p className="eyebrow">ORDER SUMMARY</p><h2>Ready to send?</h2><div><span>{cartCount} {cartCount === 1 ? "item" : "items"}</span><strong>KSh {cartTotal.toLocaleString("en-KE")}</strong></div><p>Confirming sends this order to the kitchen.</p><button className="primary-button" type="button" disabled={orderSubmitting} onClick={() => void confirmOrder()}>{orderSubmitting ? "Sending order…" : "Confirm order"} <span aria-hidden="true">→</span></button></aside></div>}
 
@@ -421,6 +543,7 @@ export function CustomerExperience({ items, profile, isOpen, tableNumber }: Cust
             <section className="confirmed-lines-panel"><div className="confirmed-lines-heading"><div><p className="eyebrow">ORDER DETAILS</p><h2>Order {confirmedOrder.number}</h2></div>{confirmedOrder.tableNumber && <span className="order-table-tag">Table {confirmedOrder.tableNumber}</span>}</div>{confirmedOrder.lines.map((line) => <article className="confirmed-order-line" key={`${line.itemId}-${line.specification}`}>{line.image ? <Image src={line.image} alt="" width={64} height={56} unoptimized /> : <span className="order-line-placeholder">{line.name.slice(0, 1)}</span>}<div><strong>{line.name}</strong>{line.specification && <span>{line.specification}</span>}<small>{line.quantity} × KSh {line.price.toLocaleString("en-KE")}</small></div><strong>KSh {(line.quantity * line.price).toLocaleString("en-KE")}</strong></article>)}<div className="confirmed-total"><span>Total</span><strong>KSh {confirmedOrder.total.toLocaleString("en-KE")}</strong></div></section>
             {orderNotice && <p className="order-action-notice" role="status">{orderNotice}</p>}
             <section className="order-service-actions"><button className={`secondary-button${confirmedOrder.billRequested ? " is-requested" : ""}`} type="button" disabled={confirmedOrder.billRequested} onClick={() => void requestService("bill")}><span className="service-action-symbol">B</span><span><strong>{confirmedOrder.billRequested ? "Bill requested" : "Request bill"}</strong><small>{confirmedOrder.billRequested ? "Service team notified" : "Pay the cashier in person"}</small></span></button><button className={`secondary-button${confirmedOrder.waiterCalled ? " is-requested" : ""}`} type="button" disabled={confirmedOrder.waiterCalled} onClick={() => void requestService("waiter")}><span className="service-action-symbol waiter-action-symbol">W</span><span><strong>{confirmedOrder.waiterCalled ? "Waiter called" : "Call waiter"}</strong><small>{confirmedOrder.waiterCalled ? "Request sent to service" : "Ask for assistance"}</small></span></button><button className="primary-button" type="button" disabled={confirmedOrder.paymentStatus !== "unpaid"} onClick={() => { setPaymentOpen((current) => !current); setPaymentCopyMessage(""); }}><span className="service-action-symbol pay-action-symbol">KSh</span><span><strong>{confirmedOrder.paymentStatus === "pending" ? "Payment pending" : confirmedOrder.paymentStatus === "paid" ? "Paid" : "Pay directly"}</strong><small>{confirmedOrder.paymentStatus === "unpaid" ? "M-Pesa payment options" : "Awaiting payment verification"}</small></span></button></section>
+            {confirmedOrder.status === "confirmed" && !confirmedOrder.assignedWaiterId && <div className="order-cancel-action"><button className="secondary-button" type="button" disabled={serviceRequestSubmitting} onClick={() => void cancelOrder()}>{serviceRequestSubmitting ? "Cancelling…" : "Cancel order"}</button><p>You can cancel while your order is waiting for waiter approval.</p></div>}
             {paymentOpen && <section className="payment-detail-panel"><div className="payment-detail-heading"><div><p className="eyebrow">M-PESA PAYMENT</p><h2>Pay KSh {confirmedOrder.total.toLocaleString("en-KE")}</h2></div><button className="dialog-close" type="button" aria-label="Close payment details" onClick={() => setPaymentOpen(false)}>×</button></div><p className="payment-detail-copy">Send the exact amount using the restaurant details below. This preview cannot verify payments.</p><dl className="payment-detail-list"><div><dt>Method</dt><dd>{profile.paymentMethod || "Not configured"}</dd></div><div><dt>Payment number</dt><dd>{profile.paymentNumber || "Not set in restaurant profile"}</dd></div>{profile.paymentMethod === "Paybill" && <div><dt>Account/reference</dt><dd>Order {confirmedOrder.number}</dd></div>}</dl><button className="copy-payment-button" type="button" disabled={!profile.paymentNumber} onClick={copyPaymentNumber}>{paymentCopyMessage.includes("copied") ? "Copied" : "Copy payment number"}</button><div className="stk-preview"><span><strong>Request STK push</strong><small>Secure M-Pesa confirmation will be enabled with server payment integration.</small></span><button className="secondary-button" type="button" disabled>STK push unavailable</button></div><button className="primary-button report-payment-button" type="button" disabled={!profile.paymentNumber || confirmedOrder.paymentStatus !== "unpaid"} onClick={submitPaymentIntent}>I&apos;ve sent the payment</button>{paymentCopyMessage && <p className="payment-status-message" role="status">{paymentCopyMessage}</p>}</section>}
             {confirmedOrder.paymentStatus === "pending" && <p className="pending-payment-notice">Payment reported. It is not verified yet, so no invoice has been issued.</p>}
             {confirmedOrder.paymentStatus === "paid" && confirmedOrder.invoiceNumber && <section className="invoice-panel"><p className="eyebrow">PAYMENT RECEIPT</p><h2>Invoice {confirmedOrder.invoiceNumber}</h2><p>Payment verified for KSh {confirmedOrder.total.toLocaleString("en-KE")}.</p></section>}
