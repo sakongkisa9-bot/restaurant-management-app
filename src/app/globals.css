@@ -2534,6 +2534,68 @@ p {
     margin-top: 4px;
   }
 
+  .staff-key-access {
+    align-items: start;
+    display: grid;
+    gap: 5px;
+    min-width: 0;
+  }
+
+  .staff-key-access > div {
+    display: flex;
+    gap: 4px;
+  }
+
+  .staff-key-access .row-action {
+    background: #fff;
+    border: 1px solid #dfe5dc;
+    border-radius: 4px;
+    color: #536e54;
+    cursor: pointer;
+    font-size: 7px;
+    min-height: 23px;
+    padding: 0 5px;
+    white-space: nowrap;
+  }
+
+  .staff-key-value {
+    background: #f0f5eb;
+    border-radius: 4px;
+    color: #405b3f;
+    font-family: var(--font-geist-mono), monospace;
+    font-size: 8px;
+    font-weight: 650;
+    overflow-wrap: anywhere;
+    padding: 5px 6px;
+    user-select: all;
+  }
+
+  .staff-key-hidden {
+    color: #8a7560;
+    font-size: 7px;
+  }
+
+  .staff-password-control {
+    align-items: center;
+    display: flex;
+    gap: 7px;
+  }
+
+  .staff-password-control input {
+    min-width: 0;
+  }
+
+  .staff-password-control .row-action {
+    background: #fff;
+    border: 1px solid #dfe5dc;
+    border-radius: 4px;
+    color: #536e54;
+    cursor: pointer;
+    font-size: 8px;
+    min-height: 32px;
+    padding: 0 9px;
+  }
+
   .order-action-notice {
     background: #fff5e8;
     border-left: 3px solid #d2a554;
@@ -4590,8 +4652,8 @@ p {
 
 .staff-table-head.waiter-columns,
 .staff-row.waiter-columns {
-  grid-template-columns: minmax(170px, 1.55fr) minmax(135px, 1.15fr) 60px 100px minmax(100px, .8fr) minmax(90px, .75fr) 75px minmax(164px, 1.4fr);
-  min-width: 1020px;
+  grid-template-columns: minmax(170px, 1.55fr) minmax(135px, 1.15fr) 60px 100px minmax(100px, .8fr) minmax(90px, .75fr) minmax(100px, .9fr) minmax(164px, 1.4fr);
+  min-width: 1050px;
 }
 
 .staff-table-head {

@@ -933,46 +933,47 @@ export default function Home() {
               </form>
             )}
 
-            {showWaiterLogin && (
-              <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && setShowWaiterLogin(false)}>
-                <section className="dialog-card" role="dialog" aria-modal="true" aria-labelledby="waiter-login-title">
-                  <button className="dialog-close" type="button" onClick={() => setShowWaiterLogin(false)} aria-label="Close waiter sign in">×</button>
-                  <div className="dialog-mark">W</div>
-                  <p className="eyebrow">WAITER SIGN IN</p>
-                  <h2 id="waiter-login-title">Open your service board</h2>
-                  <p className="dialog-description">Choose your restaurant and staff profile, then enter the security key set in the staff tracker.</p>
-                  <form onSubmit={(event) => void enterWaiterWorkspace(event)}>
-                    {!restaurantSlug && (
-                      <label className="profile-field restaurant-lookup-field" htmlFor="waiter-restaurant">
-                        <span>Restaurant</span>
-                        <select id="waiter-restaurant" value={selectedWaiterRestaurantSlug} onChange={(event) => {
-                          setSelectedWaiterRestaurantSlug(event.target.value);
-                          setWaiterOptions([]);
-                          setWaiterRestaurantId("");
-                          setSelectedWaiterId("");
-                        }}>
-                          <option value="">Select a restaurant</option>
-                          {restaurants.map((restaurant) => <option value={restaurant.slug} key={restaurant.slug}>{restaurant.name}</option>)}
-                        </select>
-                      </label>
-                    )}
-                    {!restaurantSlug && restaurantLookupError && <p className="field-error" role="alert">{restaurantLookupError}</p>}
-                    {restaurantSlug && <p className="waiter-login-restaurant">{restaurantProfile.name}</p>}
-                    <label className="profile-field restaurant-lookup-field" htmlFor="waiter-name">
-                      <span>Waiter</span>
-                      <select id="waiter-name" value={selectedWaiterId} onChange={(event) => setSelectedWaiterId(event.target.value)} disabled={!waiterOptions.length}>
-                        <option value="">{waiterOptions.length ? "Select your staff profile" : "No waiter profiles available"}</option>
-                        {waiterOptions.map((waiter) => <option value={waiter.id} key={waiter.id}>{waiter.name}</option>)}
-                      </select>
-                    </label>
-                    {selectedWaiterRestaurantSlug && !waiterOptions.length && !waiterSignInError && <p className="restaurant-lookup-status">No waiter profiles are set up for this restaurant yet.</p>}
-                    <label className="profile-field waiter-key-field" htmlFor="waiter-security-key"><span>Security key</span><input id="waiter-security-key" type="password" autoComplete="current-password" value={waiterSecurityKey} onChange={(event) => setWaiterSecurityKey(event.target.value)} /></label>
-                    {waiterSignInError && <p className="field-error" role="alert">{waiterSignInError}</p>}
-                    <button className="primary-button dialog-submit" type="submit" disabled={waiterSignInSubmitting || !waiterOptions.length}>{waiterSignInSubmitting ? "Signing in…" : "Continue to waiter page"} <span aria-hidden="true">→</span></button>
-                  </form>
-                </section>
-              </div>
-            )}
+          </section>
+        </div>
+      )}
+
+      {showWaiterLogin && (
+        <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && setShowWaiterLogin(false)}>
+          <section className="dialog-card" role="dialog" aria-modal="true" aria-labelledby="waiter-login-title">
+            <button className="dialog-close" type="button" onClick={() => setShowWaiterLogin(false)} aria-label="Close waiter sign in">×</button>
+            <div className="dialog-mark">W</div>
+            <p className="eyebrow">WAITER SIGN IN</p>
+            <h2 id="waiter-login-title">Open your service board</h2>
+            <p className="dialog-description">Choose your restaurant and staff profile, then enter the security key set in the staff tracker.</p>
+            <form onSubmit={(event) => void enterWaiterWorkspace(event)}>
+              {!restaurantSlug && (
+                <label className="profile-field restaurant-lookup-field" htmlFor="waiter-restaurant">
+                  <span>Restaurant</span>
+                  <select id="waiter-restaurant" value={selectedWaiterRestaurantSlug} onChange={(event) => {
+                    setSelectedWaiterRestaurantSlug(event.target.value);
+                    setWaiterOptions([]);
+                    setWaiterRestaurantId("");
+                    setSelectedWaiterId("");
+                  }}>
+                    <option value="">Select a restaurant</option>
+                    {restaurants.map((restaurant) => <option value={restaurant.slug} key={restaurant.slug}>{restaurant.name}</option>)}
+                  </select>
+                </label>
+              )}
+              {!restaurantSlug && restaurantLookupError && <p className="field-error" role="alert">{restaurantLookupError}</p>}
+              {restaurantSlug && <p className="waiter-login-restaurant">{restaurantProfile.name}</p>}
+              <label className="profile-field restaurant-lookup-field" htmlFor="waiter-name">
+                <span>Waiter</span>
+                <select id="waiter-name" value={selectedWaiterId} onChange={(event) => setSelectedWaiterId(event.target.value)} disabled={!waiterOptions.length}>
+                  <option value="">{waiterOptions.length ? "Select your staff profile" : "No waiter profiles available"}</option>
+                  {waiterOptions.map((waiter) => <option value={waiter.id} key={waiter.id}>{waiter.name}</option>)}
+                </select>
+              </label>
+              {selectedWaiterRestaurantSlug && !waiterOptions.length && !waiterSignInError && <p className="restaurant-lookup-status">No waiter profiles are set up for this restaurant yet.</p>}
+              <label className="profile-field waiter-key-field" htmlFor="waiter-security-key"><span>Security key</span><input id="waiter-security-key" type="password" autoComplete="current-password" value={waiterSecurityKey} onChange={(event) => setWaiterSecurityKey(event.target.value)} /></label>
+              {waiterSignInError && <p className="field-error" role="alert">{waiterSignInError}</p>}
+              <button className="primary-button dialog-submit" type="submit" disabled={waiterSignInSubmitting || !waiterOptions.length}>{waiterSignInSubmitting ? "Signing in…" : "Continue to waiter page"} <span aria-hidden="true">→</span></button>
+            </form>
           </section>
         </div>
       )}

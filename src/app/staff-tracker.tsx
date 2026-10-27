@@ -111,8 +111,12 @@ export function StaffTracker({ profile }: StaffTrackerProps) {
   const [loadedRestaurantId, setLoadedRestaurantId] = useState("");
   const [view, setView] = useState<"list" | "form">("list");
   const [form, setForm] = useState<StaffForm>(emptyForm());
+  const [showStaffPassword, setShowStaffPassword] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [inlineDrafts, setInlineDrafts] = useState<Record<string, StaffMember>>({});
+  const [revealedWaiterKeys, setRevealedWaiterKeys] = useState<Record<string, string>>({});
+  const [editingKeyId, setEditingKeyId] = useState<string | null>(null);
+  const [keyDrafts, setKeyDrafts] = useState<Record<string, string>>({});
   const [showAllWaiters, setShowAllWaiters] = useState(false);
   const [salaryMonth, setSalaryMonth] = useState("");
   const [error, setError] = useState("");
@@ -191,6 +195,7 @@ export function StaffTracker({ profile }: StaffTrackerProps) {
 
   function openAdd(role: StaffRole) {
     setForm(emptyForm(role));
+    setShowStaffPassword(false);
     setError("");
     setView("form");
   }
@@ -265,6 +270,7 @@ export function StaffTracker({ profile }: StaffTrackerProps) {
         throw new Error("The staff response was invalid.");
       }
       setStaff((current) => [...current, member]);
+      if (form.role === "Waiter") setRevealedWaiterKeys((current) => ({ ...current, [member.id]: form.password }));
       setView("list");
       setError("");
     } catch (saveError) {
@@ -288,6 +294,7 @@ export function StaffTracker({ profile }: StaffTrackerProps) {
       setError("Staff name cannot be empty.");
       return;
     }
+
     try {
       const response = await fetch(`/api/staff/${encodeURIComponent(member.id)}`, {
         method: "PUT",
@@ -317,6 +324,44 @@ export function StaffTracker({ profile }: StaffTrackerProps) {
       setError("");
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : "Could not save this staff member.");
+    }
+  }
+
+  async function saveWaiterKey(member: StaffMember) {
+    const password = keyDrafts[member.id] ?? "";
+    if (password.length < 8) {
+      setError("Waiter security keys must be at least 8 characters.");
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/staff/${encodeURIComponent(member.id)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...member, password }),
+      });
+      const payload: unknown = await response.json();
+      if (!response.ok) {
+        const message = typeof payload === "object" && payload !== null && "error" in payload && typeof payload.error === "string"
+          ? payload.error
+          : "Could not reset this waiter’s security key.";
+        throw new Error(message);
+      }
+      const updatedMember = typeof payload === "object" && payload !== null && "staff" in payload
+        ? parseStaffMember(payload.staff)
+        : null;
+      if (!updatedMember) throw new Error("The updated staff response was invalid.");
+      setStaff((current) => current.map((item) => item.id === member.id ? updatedMember : item));
+      setRevealedWaiterKeys((current) => ({ ...current, [member.id]: password }));
+      setKeyDrafts((current) => {
+        const next = { ...current };
+        delete next[member.id];
+        return next;
+      });
+      setEditingKeyId(null);
+      setError("");
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Could not reset this waiter’s security key.");
     }
   }
 
@@ -377,7 +422,26 @@ export function StaffTracker({ profile }: StaffTrackerProps) {
             {showWaiterColumns && <><strong className="staff-stat-cell">{isEditing ? <span>{member.ordersTaken}</span> : member.ordersTaken}</strong><strong className="staff-stat-cell">KSh {member.revenueGenerated.toLocaleString("en-KE")}</strong></>}
             <div className="staff-salary-cell">{isEditing ? <input className="staff-row-input salary-row-input" aria-label={`${member.name} monthly salary`} min="0" type="number" value={draft.salary ?? ""} onChange={(event) => updateInline(member, "salary", event.target.value ? Number(event.target.value) : null)} /> : <strong>{member.salary === null ? "Not set" : `KSh ${member.salary.toLocaleString("en-KE")}`}</strong>}</div>
             <div className="staff-payment-cell">{isEditing ? <select className="staff-row-select" aria-label={`${member.name} payment status`} value={paymentStatus} onChange={(event) => updateMonthlyPayment(member, event.target.value as PaymentStatus)}>{paymentStatuses.map((status) => <option key={status}>{status}</option>)}</select> : <span className={`staff-payment-badge${paymentStatus === "Paid" ? " is-paid" : ""}`}>{paymentStatus}</span>}</div>
-            <span className="staff-access-note">Access enabled</span>
+            {showWaiterColumns && member.role === "Waiter" ? (
+              <div className="staff-key-access">
+                {editingKeyId === member.id ? (
+                  <>
+                    <input className="staff-row-input" aria-label={`New security key for ${member.name}`} autoComplete="new-password" minLength={8} placeholder="New key (8+ chars)" type="text" value={keyDrafts[member.id] ?? ""} onChange={(event) => setKeyDrafts((current) => ({ ...current, [member.id]: event.target.value }))} />
+                    <div><button className="row-action save-row-action" type="button" onClick={() => void saveWaiterKey(member)}>Save key</button><button className="row-action" type="button" onClick={() => { setEditingKeyId(null); setKeyDrafts((current) => { const next = { ...current }; delete next[member.id]; return next; }); }}>Cancel</button></div>
+                  </>
+                ) : revealedWaiterKeys[member.id] ? (
+                  <>
+                    <span className="staff-key-value" title="Visible only in this staff-tracker session">{revealedWaiterKeys[member.id]}</span>
+                    <button className="row-action" type="button" onClick={() => setEditingKeyId(member.id)}>Reset key</button>
+                  </>
+                ) : (
+                  <>
+                    <span className="staff-key-hidden">Key protected</span>
+                    <button className="row-action" type="button" onClick={() => { setKeyDrafts((current) => ({ ...current, [member.id]: "" })); setEditingKeyId(member.id); }}>Set / reset</button>
+                  </>
+                )}
+              </div>
+            ) : <span className="staff-access-note">Access enabled</span>}
             <div className="staff-row-actions"><button className="row-action" type="button" onClick={() => isEditing ? setEditingId(null) : beginInlineEdit(member)}>{isEditing ? "Cancel" : "Edit"}</button><button className="row-action save-row-action" type="button" disabled={!isEditing} onClick={() => saveInline(member)}>Save</button><button className="row-action delete-row-action" type="button" onClick={() => deleteMember(member)}>Delete</button><button className="row-action print-id-action" type="button" onClick={() => openPrintCard(member)}>Print ID</button></div>
           </div>;
         })}</div>}
@@ -428,8 +492,8 @@ export function StaffTracker({ profile }: StaffTrackerProps) {
                 <input autoComplete="email" placeholder="name@example.com" type="email" value={form.email} onChange={(event) => updateForm("email", event.target.value)} />
               </label>
               <label className="staff-field">
-                <span>Password</span>
-                <input autoComplete="new-password" minLength={8} placeholder="At least 8 characters" type="password" value={form.password} onChange={(event) => updateForm("password", event.target.value)} />
+                <span>{form.role === "Waiter" ? "Security key" : "Password"}</span>
+                <div className="staff-password-control"><input autoComplete="new-password" minLength={8} placeholder="At least 8 characters" type={showStaffPassword ? "text" : "password"} value={form.password} onChange={(event) => updateForm("password", event.target.value)} /><button className="row-action" type="button" onClick={() => setShowStaffPassword((current) => !current)}>{showStaffPassword ? "Hide" : "Show"}</button></div>
               </label>
               <label className="staff-field">
                 <span>Monthly salary <small>Optional · KSh</small></span>
@@ -442,7 +506,7 @@ export function StaffTracker({ profile }: StaffTrackerProps) {
                 </select>
               </label>
             </div>
-            <div className="staff-access-warning"><span>!</span><p>Staff passwords are securely hashed before they are stored.</p></div>
+            <div className="staff-access-warning"><span>!</span><p>Staff security keys are securely hashed. A new waiter key will be shown in Access after saving; existing keys cannot be recovered, but can be reset.</p></div>
             {error && <p className="staff-error" role="alert">{error}</p>}
             <div className="staff-form-actions">
               <button className="secondary-button" type="button" onClick={() => setView("list")}>Cancel</button>
