@@ -22,6 +22,45 @@ type ConfirmedOrder = {
   invoiceNumber?: string;
   ratings?: Record<string, number>;
 };
+
+function parseConfirmedOrder(value: unknown): ConfirmedOrder | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)
+    || !("id" in value) || typeof value.id !== "string"
+    || !("number" in value) || typeof value.number !== "string"
+    || !("lines" in value) || !Array.isArray(value.lines)
+    || !("total" in value) || typeof value.total !== "number"
+    || !("tableNumber" in value) || typeof value.tableNumber !== "string"
+    || !("status" in value) || !["confirmed", "cooking", "ready", "completed"].includes(String(value.status))
+    || !("createdAt" in value) || typeof value.createdAt !== "string"
+    || !("billRequested" in value) || typeof value.billRequested !== "boolean"
+    || !("waiterCalled" in value) || typeof value.waiterCalled !== "boolean"
+    || !("paymentStatus" in value) || !["unpaid", "pending", "paid"].includes(String(value.paymentStatus))) return null;
+
+  const lines: ConfirmedOrder["lines"] = [];
+  for (const line of value.lines) {
+    if (typeof line !== "object" || line === null || Array.isArray(line)
+      || !("itemId" in line) || typeof line.itemId !== "string"
+      || !("quantity" in line) || typeof line.quantity !== "number"
+      || !("specification" in line) || typeof line.specification !== "string"
+      || !("name" in line) || typeof line.name !== "string"
+      || !("price" in line) || typeof line.price !== "number"
+      || !("image" in line) || typeof line.image !== "string") return null;
+    lines.push({ itemId: line.itemId, quantity: line.quantity, specification: line.specification, name: line.name, price: line.price, image: line.image });
+  }
+
+  return {
+    id: value.id,
+    number: value.number,
+    lines,
+    total: value.total,
+    tableNumber: value.tableNumber,
+    status: value.status as OrderStatus,
+    createdAt: value.createdAt,
+    billRequested: value.billRequested,
+    waiterCalled: value.waiterCalled,
+    paymentStatus: value.paymentStatus as ConfirmedOrder["paymentStatus"],
+  };
+}
 type CustomerExperienceProps = {
   items: MenuItem[];
   profile: RestaurantProfileData;
@@ -46,6 +85,7 @@ export function CustomerExperience({ items, profile, isOpen, tableNumber }: Cust
   const [cart, setCart] = useState<CartEntry[]>([]);
   const [confirmedOrder, setConfirmedOrder] = useState<ConfirmedOrder | null>(null);
   const [orderLoaded, setOrderLoaded] = useState(false);
+  const [loadedOrderStorageKey, setLoadedOrderStorageKey] = useState("");
   const [paymentOpen, setPaymentOpen] = useState(false);
   const [paymentCopyMessage, setPaymentCopyMessage] = useState("");
   const [orderNotice, setOrderNotice] = useState("");
@@ -65,6 +105,7 @@ export function CustomerExperience({ items, profile, isOpen, tableNumber }: Cust
   }, 0);
   const orderActive = Boolean(confirmedOrder && confirmedOrder.status !== "completed");
   const restaurantPhotos = profile.photos;
+  const orderStorageKey = profile.id ? `room.customer-order.v1.${profile.id}` : "";
 
   useEffect(() => {
     if (restaurantPhotos.length < 2) return;
@@ -73,30 +114,40 @@ export function CustomerExperience({ items, profile, isOpen, tableNumber }: Cust
   }, [restaurantPhotos.length]);
 
   useEffect(() => {
+    let active = true;
     const loadOrder = window.setTimeout(() => {
       try {
-        const storedOrder = window.localStorage.getItem("room.customer-order.v1");
-        if (storedOrder) {
-          const parsedOrder: unknown = JSON.parse(storedOrder);
-          if (parsedOrder && typeof parsedOrder === "object") setConfirmedOrder(parsedOrder as ConfirmedOrder);
+        const storedOrder = orderStorageKey ? window.localStorage.getItem(orderStorageKey) : null;
+        const parsedOrder: unknown = storedOrder ? JSON.parse(storedOrder) : null;
+        if (active) {
+          setConfirmedOrder(parseConfirmedOrder(parsedOrder));
+          setLoadedOrderStorageKey(orderStorageKey);
+          setOrderLoaded(true);
         }
       } catch {
-        window.localStorage.removeItem("room.customer-order.v1");
+        if (active) {
+          setConfirmedOrder(null);
+          setLoadedOrderStorageKey(orderStorageKey);
+          setOrderLoaded(true);
+        }
       }
-      setOrderLoaded(true);
     }, 0);
-    return () => window.clearTimeout(loadOrder);
-  }, []);
+    return () => {
+      active = false;
+      window.clearTimeout(loadOrder);
+    };
+  }, [orderStorageKey]);
 
   useEffect(() => {
-    if (!orderLoaded) return;
+    if (!orderLoaded || loadedOrderStorageKey !== orderStorageKey) return;
     try {
-      if (confirmedOrder) window.localStorage.setItem("room.customer-order.v1", JSON.stringify(confirmedOrder));
-      else window.localStorage.removeItem("room.customer-order.v1");
+      if (!orderStorageKey) return;
+      if (confirmedOrder) window.localStorage.setItem(orderStorageKey, JSON.stringify(confirmedOrder));
+      else window.localStorage.removeItem(orderStorageKey);
     } catch {
       return;
     }
-  }, [confirmedOrder, orderLoaded]);
+  }, [confirmedOrder, loadedOrderStorageKey, orderLoaded, orderStorageKey]);
 
   function openDish(item: MenuItem) {
     setSelectedFood(item);
@@ -152,22 +203,40 @@ export function CustomerExperience({ items, profile, isOpen, tableNumber }: Cust
     setOrderNotice(request === "bill" ? "Bill request recorded. Cashier notifications will connect when staff tools are set up." : "Waiter request recorded. Live waiter notifications will connect when staff tools are set up.");
   }
 
-  function submitFeedback(event: FormEvent<HTMLFormElement>) {
+  async function submitFeedback(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!feedbackText.trim()) {
       setFeedbackMessage("Write a short message before submitting.");
       return;
     }
 
+    if (!profile.id) {
+      setFeedbackMessage("This restaurant is not ready to receive feedback yet.");
+      return;
+    }
+
     try {
-      const current: unknown = JSON.parse(window.localStorage.getItem("room.customer-feedback.v1") ?? "[]");
-      const feedback = Array.isArray(current) ? current : [];
-      feedback.push({ id: crypto.randomUUID(), type: feedbackType, message: feedbackText.trim(), orderNumber: confirmedOrder?.number ?? null, createdAt: new Date().toISOString() });
-      window.localStorage.setItem("room.customer-feedback.v1", JSON.stringify(feedback));
+      const response = await fetch("/api/feedback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          restaurantId: profile.id,
+          type: feedbackType,
+          message: feedbackText.trim(),
+          orderNumber: confirmedOrder?.number ?? "",
+        }),
+      });
+      const payload: unknown = await response.json();
+      if (!response.ok) {
+        const message = typeof payload === "object" && payload !== null && "error" in payload && typeof payload.error === "string"
+          ? payload.error
+          : "Feedback could not be saved.";
+        throw new Error(message);
+      }
       setFeedbackText("");
-      setFeedbackMessage(`${feedbackType === "recommendation" ? "Recommendation" : "Complaint"} saved in this browser preview.`);
-    } catch {
-      setFeedbackMessage("Feedback could not be saved in this browser.");
+      setFeedbackMessage(`${feedbackType === "recommendation" ? "Recommendation" : "Complaint"} sent to ${profile.name}.`);
+    } catch (submitError) {
+      setFeedbackMessage(submitError instanceof Error ? submitError.message : "Feedback could not be saved.");
     }
   }
 

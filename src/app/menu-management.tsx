@@ -22,9 +22,9 @@ export type MenuItem = {
 type EditableFields = Omit<MenuItem, "id" | "orderCount">;
 type MenuManagementProps = {
   items: MenuItem[];
-  onAddItem: (item: MenuItem) => void;
-  onSaveItems: (items: MenuItem[]) => void;
-  onDeleteItem: (id: string) => void;
+  onAddItem: (item: Omit<MenuItem, "id">) => Promise<MenuItem>;
+  onSaveItems: (items: MenuItem[]) => Promise<void>;
+  onDeleteItem: (id: string) => Promise<void>;
 };
 
 const categories = ["Mains", "Sides", "Drinks", "Desserts", "Other"];
@@ -49,6 +49,7 @@ export function MenuManagement({ items, onAddItem, onSaveItems, onDeleteItem }: 
   const [drafts, setDrafts] = useState<Record<string, EditableFields>>({});
   const [showAllBest, setShowAllBest] = useState(false);
   const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
   const [specificationInput, setSpecificationInput] = useState("");
   const [foodForm, setFoodForm] = useState({
     name: "",
@@ -92,7 +93,7 @@ export function MenuManagement({ items, onAddItem, onSaveItems, onDeleteItem }: 
     return "";
   }
 
-  function saveOne(item: MenuItem) {
+  async function saveOne(item: MenuItem) {
     const fields = drafts[item.id] ?? editableFields(item);
     const validationError = validateFields(fields);
     if (validationError) {
@@ -100,7 +101,15 @@ export function MenuManagement({ items, onAddItem, onSaveItems, onDeleteItem }: 
       return;
     }
 
-    onSaveItems([{ ...item, ...fields, name: fields.name.trim() }]);
+    setSaving(true);
+    try {
+      await onSaveItems([{ ...item, ...fields, name: fields.name.trim() }]);
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Could not save this menu item.");
+      return;
+    } finally {
+      setSaving(false);
+    }
     setEditingIds((current) => {
       const next = new Set(current);
       next.delete(item.id);
@@ -114,7 +123,7 @@ export function MenuManagement({ items, onAddItem, onSaveItems, onDeleteItem }: 
     setError("");
   }
 
-  function saveAll() {
+  async function saveAll() {
     const editedItems = items.filter((item) => editingIds.has(item.id));
     for (const item of editedItems) {
       const validationError = validateFields(drafts[item.id] ?? editableFields(item));
@@ -124,7 +133,15 @@ export function MenuManagement({ items, onAddItem, onSaveItems, onDeleteItem }: 
       }
     }
 
-    onSaveItems(editedItems.map((item) => ({ ...item, ...(drafts[item.id] ?? editableFields(item)) })));
+    setSaving(true);
+    try {
+      await onSaveItems(editedItems.map((item) => ({ ...item, ...(drafts[item.id] ?? editableFields(item)) })));
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Could not save menu items.");
+      return;
+    } finally {
+      setSaving(false);
+    }
     setEditingIds(new Set());
     setDrafts({});
     setError("");
@@ -186,7 +203,7 @@ export function MenuManagement({ items, onAddItem, onSaveItems, onDeleteItem }: 
     setFoodForm((current) => ({ ...current, specifications: current.specifications.filter((item) => item !== value) }));
   }
 
-  function addFood(event: FormEvent<HTMLFormElement>) {
+  async function addFood(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const price = Number(foodForm.price);
     if (!foodForm.name.trim()) {
@@ -198,29 +215,44 @@ export function MenuManagement({ items, onAddItem, onSaveItems, onDeleteItem }: 
       return;
     }
 
-    onAddItem({
-      id: crypto.randomUUID(),
-      name: foodForm.name.trim(),
-      price,
-      description: foodForm.description.trim(),
-      image: foodForm.images[0] ?? "",
-      images: foodForm.images,
-      specifications: foodForm.specifications,
-      available: true,
-      rating: 0,
-      ratingCount: 0,
-      category: foodForm.category,
-      mealPeriod: foodForm.mealPeriod,
-      orderCount: 0,
-    });
+    setSaving(true);
+    try {
+      await onAddItem({
+        name: foodForm.name.trim(),
+        price,
+        description: foodForm.description.trim(),
+        image: foodForm.images[0] ?? "",
+        images: foodForm.images,
+        specifications: foodForm.specifications,
+        available: true,
+        rating: 0,
+        ratingCount: 0,
+        category: foodForm.category,
+        mealPeriod: foodForm.mealPeriod,
+        orderCount: 0,
+      });
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Could not add this menu item.");
+      return;
+    } finally {
+      setSaving(false);
+    }
     setFoodForm({ name: "", price: "", description: "", image: "", images: [], specifications: [], category: categories[0], mealPeriod: mealPeriods[1] });
     setError("");
     setView("list");
   }
 
-  function deleteItem(item: MenuItem) {
+  async function deleteItem(item: MenuItem) {
     if (!window.confirm(`Delete ${item.name} from the menu?`)) return;
-    onDeleteItem(item.id);
+    setSaving(true);
+    try {
+      await onDeleteItem(item.id);
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : "Could not delete this menu item.");
+      return;
+    } finally {
+      setSaving(false);
+    }
     setEditingIds((current) => {
       const next = new Set(current);
       next.delete(item.id);
@@ -257,7 +289,7 @@ export function MenuManagement({ items, onAddItem, onSaveItems, onDeleteItem }: 
               <div className="menu-field menu-field-wide specification-field"><span>Customer specifications <small>Optional · e.g. Hot, Cold</small></span><div className="specification-entry"><input aria-label="Specification option" maxLength={32} placeholder="Add an option" value={specificationInput} onChange={(event) => setSpecificationInput(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); addSpecification(); } }} /><button className="secondary-button" type="button" onClick={addSpecification}>Add option</button></div>{foodForm.specifications.length > 0 && <div className="specification-chips">{foodForm.specifications.map((specification) => <span key={specification}>{specification}<button type="button" onClick={() => removeSpecification(specification)} aria-label={`Remove ${specification}`}>×</button></span>)}</div>}</div>
             </div>
             {error && <p className="menu-error" role="alert">{error}</p>}
-            <div className="food-form-actions"><button className="secondary-button" type="button" onClick={() => { setError(""); setView("list"); }}>Cancel</button><button className="primary-button" type="submit">Save food</button></div>
+            <div className="food-form-actions"><button className="secondary-button" type="button" disabled={saving} onClick={() => { setError(""); setView("list"); }}>Cancel</button><button className="primary-button" type="submit" disabled={saving}>{saving ? "Saving…" : "Save food"}</button></div>
           </form>
         </section>
       ) : (
@@ -265,7 +297,7 @@ export function MenuManagement({ items, onAddItem, onSaveItems, onDeleteItem }: 
           <section className="menu-list-panel">
             <div className="menu-panel-heading">
               <div><p className="eyebrow">MENU MANAGEMENT</p><h2>Menu list <span className="menu-count">{items.length}</span></h2><p className="menu-panel-copy">Manage the dishes customers can see.</p></div>
-              <div className="menu-bulk-actions"><button className="secondary-button" type="button" disabled={items.length === 0} onClick={beginEditAll}>Edit all</button><button className="primary-button" type="button" disabled={editingIds.size === 0} onClick={saveAll}>Save all</button></div>
+              <div className="menu-bulk-actions"><button className="secondary-button" type="button" disabled={items.length === 0 || saving} onClick={beginEditAll}>Edit all</button><button className="primary-button" type="button" disabled={editingIds.size === 0 || saving} onClick={saveAll}>{saving ? "Saving…" : "Save all"}</button></div>
             </div>
             {error && <p className="menu-error" role="alert">{error}</p>}
             {items.length === 0 ? (
@@ -289,7 +321,7 @@ export function MenuManagement({ items, onAddItem, onSaveItems, onDeleteItem }: 
                         {isEditing ? <><select aria-label={`${item.name} category`} className="row-select" value={draft.category} onChange={(event) => updateDraft(item, "category", event.target.value)}>{categories.map((category) => <option key={category}>{category}</option>)}</select><select aria-label={`${item.name} meal period`} className="row-select" value={draft.mealPeriod} onChange={(event) => updateDraft(item, "mealPeriod", event.target.value)}>{mealPeriods.map((meal) => <option key={meal}>{meal}</option>)}</select></> : <><span className="menu-category-tag">{item.category}</span><span className="menu-meal-tag">{item.mealPeriod}</span></>}
                       </div>
                       <div className="menu-price-cell">{isEditing ? <label className="price-edit-field"><span>KSh</span><input aria-label={`${item.name} price`} className="row-input row-price-input" inputMode="decimal" min="1" type="number" value={draft.price} onChange={(event) => updateDraft(item, "price", Number(event.target.value))} /></label> : <strong>KSh {item.price.toLocaleString("en-KE")}</strong>}</div>
-                      <div className="menu-row-actions"><button className="row-action" type="button" onClick={() => beginEdit(item)} disabled={isEditing} aria-label={`Edit ${item.name}`} title="Edit">Edit</button><button className="row-action save-row-action" type="button" onClick={() => saveOne(item)} disabled={!isEditing} aria-label={`Save ${item.name}`} title="Save">Save</button><button className="row-action delete-row-action" type="button" onClick={() => deleteItem(item)} aria-label={`Delete ${item.name}`} title="Delete">Delete</button></div>
+                      <div className="menu-row-actions"><button className="row-action" type="button" onClick={() => beginEdit(item)} disabled={isEditing || saving} aria-label={`Edit ${item.name}`} title="Edit">Edit</button><button className="row-action save-row-action" type="button" onClick={() => saveOne(item)} disabled={!isEditing || saving} aria-label={`Save ${item.name}`} title="Save">Save</button><button className="row-action delete-row-action" type="button" onClick={() => deleteItem(item)} disabled={saving} aria-label={`Delete ${item.name}`} title="Delete">Delete</button></div>
                     </div>
                   );
                 })}

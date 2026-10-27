@@ -17,6 +17,16 @@ type Schedule = Record<DayName, BusinessDay>;
 type CustomerFeedback = { id: string; type: "recommendation" | "complaint"; message: string; orderNumber: string | null; createdAt: string };
 type RestaurantOption = Pick<RestaurantProfileData, "name" | "slug">;
 
+function parseCustomerFeedback(value: unknown): CustomerFeedback | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)
+    || !("id" in value) || typeof value.id !== "string"
+    || !("type" in value) || (value.type !== "recommendation" && value.type !== "complaint")
+    || !("message" in value) || typeof value.message !== "string"
+    || !("createdAt" in value) || typeof value.createdAt !== "string") return null;
+  const orderNumber = "orderNumber" in value && typeof value.orderNumber === "string" ? value.orderNumber : null;
+  return { id: value.id, type: value.type, message: value.message, orderNumber, createdAt: value.createdAt };
+}
+
 function isRestaurantOption(value: unknown): value is RestaurantOption {
   return typeof value === "object"
     && value !== null
@@ -24,6 +34,44 @@ function isRestaurantOption(value: unknown): value is RestaurantOption {
     && typeof value.name === "string"
     && "slug" in value
     && typeof value.slug === "string";
+}
+
+function parseMenuItem(value: unknown): MenuItem | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  if (!("id" in value) || typeof value.id !== "string"
+    || !("name" in value) || typeof value.name !== "string"
+    || !("price" in value) || typeof value.price !== "number"
+    || !("category" in value) || typeof value.category !== "string"
+    || !("mealPeriod" in value) || typeof value.mealPeriod !== "string") return null;
+  const images = "images" in value && Array.isArray(value.images) && value.images.every((image) => typeof image === "string")
+    ? value.images
+    : [];
+  const specifications = "specifications" in value && Array.isArray(value.specifications) && value.specifications.every((item) => typeof item === "string")
+    ? value.specifications
+    : [];
+  const description = "description" in value && typeof value.description === "string" ? value.description : "";
+  const image = "image" in value && typeof value.image === "string" ? value.image : images[0] ?? "";
+  const orderCount = "orderCount" in value && typeof value.orderCount === "number" ? value.orderCount : 0;
+  const available = "available" in value && typeof value.available === "boolean" ? value.available : true;
+  return {
+    id: value.id,
+    name: value.name,
+    price: value.price,
+    description,
+    image,
+    images,
+    specifications,
+    available,
+    category: value.category,
+    mealPeriod: value.mealPeriod,
+    orderCount,
+  };
+}
+
+function responseError(payload: unknown, fallback: string) {
+  return typeof payload === "object" && payload !== null && "error" in payload && typeof payload.error === "string"
+    ? payload.error
+    : fallback;
 }
 
 const days: DayName[] = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
@@ -179,14 +227,21 @@ export default function Home() {
           fetch(`/api/feedback?restaurantId=${encodeURIComponent(restaurantId)}`),
         ]);
         if (menuResponse.ok) {
-          const menuJson = await menuResponse.json();
-          setMenuItems(Array.isArray(menuJson.menu) ? menuJson.menu : []);
+          const menuJson: unknown = await menuResponse.json();
+          const menuRows: unknown[] = typeof menuJson === "object" && menuJson !== null && "menu" in menuJson && Array.isArray(menuJson.menu)
+            ? menuJson.menu
+            : [];
+          const menu = menuRows.map(parseMenuItem).filter((item): item is MenuItem => item !== null);
+          setMenuItems(menu);
         } else {
           setMenuItems([]);
         }
         if (feedbackResponse.ok) {
-          const feedbackJson = await feedbackResponse.json();
-          setCustomerFeedback(Array.isArray(feedbackJson.feedback) ? feedbackJson.feedback : []);
+          const feedbackJson: unknown = await feedbackResponse.json();
+          const feedbackRows: unknown[] = typeof feedbackJson === "object" && feedbackJson !== null && "feedback" in feedbackJson && Array.isArray(feedbackJson.feedback)
+            ? feedbackJson.feedback
+            : [];
+          setCustomerFeedback(feedbackRows.map(parseCustomerFeedback).filter((entry): entry is CustomerFeedback => entry !== null));
         } else {
           setCustomerFeedback([]);
         }
@@ -202,6 +257,28 @@ export default function Home() {
       setIsServerDataReady(true);
     }
   }, []);
+
+  useEffect(() => {
+    if (workspace !== "admin" || !restaurantProfile.id) return;
+    let active = true;
+    const timer = window.setTimeout(async () => {
+      try {
+        const response = await fetch(`/api/feedback?restaurantId=${encodeURIComponent(restaurantProfile.id ?? "")}`, { cache: "no-store" });
+        if (!response.ok) return;
+        const payload: unknown = await response.json();
+        if (typeof payload === "object" && payload !== null && "feedback" in payload && Array.isArray(payload.feedback) && active) {
+          const rows: unknown[] = payload.feedback;
+          setCustomerFeedback(rows.map(parseCustomerFeedback).filter((entry): entry is CustomerFeedback => entry !== null));
+        }
+      } catch {
+        if (active) setCustomerFeedback([]);
+      }
+    }, 0);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [restaurantProfile.id, workspace]);
 
   useEffect(() => {
     const initialization = window.setTimeout(async () => {
@@ -364,9 +441,49 @@ export default function Home() {
     setShowHours(false);
   }
 
-  function saveMenuItems(updatedItems: MenuItem[]) {
-    const updates = new Map(updatedItems.map((item) => [item.id, item]));
+  async function addMenuItem(item: Omit<MenuItem, "id">) {
+    if (!restaurantProfile.id) throw new Error("This restaurant is not linked to a registered account.");
+    const response = await fetch("/api/menu", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...item, restaurantId: restaurantProfile.id }),
+    });
+    const payload: unknown = await response.json();
+    if (!response.ok) throw new Error(responseError(payload, "Could not add this menu item."));
+    const created = typeof payload === "object" && payload !== null && "item" in payload ? parseMenuItem(payload.item) : null;
+    if (!created) throw new Error("The menu response was invalid.");
+    setMenuItems((current) => [...current, created]);
+    return created;
+  }
+
+  async function saveMenuItems(updatedItems: MenuItem[]) {
+    if (!restaurantProfile.id) throw new Error("This restaurant is not linked to a registered account.");
+    const savedItems = await Promise.all(updatedItems.map(async (item) => {
+      const response = await fetch(`/api/menu/${encodeURIComponent(item.id)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...item, restaurantId: restaurantProfile.id }),
+      });
+      const payload: unknown = await response.json();
+      if (!response.ok) throw new Error(responseError(payload, `Could not save ${item.name}.`));
+      const saved = typeof payload === "object" && payload !== null && "item" in payload ? parseMenuItem(payload.item) : null;
+      if (!saved) throw new Error(`The saved menu response for ${item.name} was invalid.`);
+      return saved;
+    }));
+    const updates = new Map(savedItems.map((item) => [item.id, item]));
     setMenuItems((current) => current.map((item) => updates.get(item.id) ?? item));
+  }
+
+  async function deleteMenuItem(id: string) {
+    if (!restaurantProfile.id) throw new Error("This restaurant is not linked to a registered account.");
+    const response = await fetch(`/api/menu/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ restaurantId: restaurantProfile.id }),
+    });
+    const payload: unknown = await response.json();
+    if (!response.ok) throw new Error(responseError(payload, "Could not delete this menu item."));
+    setMenuItems((current) => current.filter((item) => item.id !== id));
   }
 
   function moveChart(direction: number) {
@@ -665,9 +782,9 @@ export default function Home() {
             ) : adminPage === "Menu" ? (
               <MenuManagement
                 items={menuItems}
-                onAddItem={(item) => setMenuItems((current) => [...current, item])}
+                onAddItem={addMenuItem}
                 onSaveItems={saveMenuItems}
-                onDeleteItem={(id) => setMenuItems((current) => current.filter((item) => item.id !== id))}
+                onDeleteItem={deleteMenuItem}
               />
             ) : adminPage === "Restaurant profile" ? (
               isServerDataReady ? (
